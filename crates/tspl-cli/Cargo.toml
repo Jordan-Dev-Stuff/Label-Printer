@@ -1,0 +1,17 @@
+[package]
+name = "tspl-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Command line front end for driverless TSPL label printing"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "tspl-rs"
+path = "src/main.rs"
+
+[dependencies]
+tspl-core = { path = "../tspl-core" }

@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/tspl-core", "crates/tspl-cli", "crates/thermal-ui"]
+default-members = ["crates/tspl-core", "crates/tspl-cli", "crates/thermal-ui"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/Jordan-Dev-Stuff/Label-Printer"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[profile.release]
+strip = true
+lto = "thin"

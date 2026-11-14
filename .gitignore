@@ -1,0 +1,21 @@
+# Rust build output (also the per-crate target/ folders some tests create)
+target/
+
+# pdfium shared libraries, fetched by scripts/fetch-pdfium.* and embedded
+# into the app at build time
+vendor/pdfium/*/
+
+# Settings saved beside a portable copy of the app
+thermal-rs-data/
+
+# Jobs and captures written by local runs
+out/
+*.tspl
+*.prn
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

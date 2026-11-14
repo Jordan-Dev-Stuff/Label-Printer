@@ -1,0 +1,54 @@
+[package]
+name = "thermal-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dark-mode desktop app for driverless TSPL label printing"
+
+
+[features]
+# PDF support is on by default. Build with `--no-default-features` to compile
+# without the pdfium binding; the app then reports PDFs as unsupported.
+default = ["pdf"]
+pdf = ["dep:pdfium-render"]
+
+[dependencies]
+tspl-core = { path = "../tspl-core" }
+
+# egui desktop stack with Phosphor icons.
+eframe = { version = "0.36", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "persistence",
+    "wayland",
+    "x11",
+] }
+egui-phosphor = { version = "0.14", default-features = false, features = ["regular", "fill"] }
+serde = { version = "1", features = ["derive"] }
+
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "gif",
+    "tiff",
+    "webp",
+] }
+rfd = "0.15"
+btleplug = "0.11"
+tokio = { version = "1", features = ["rt", "time"] }
+
+# PDF rasterisation. The crate loads pdfium as a dynamic library at runtime.
+# Its bindings are compiled for one pdfium API revision, so the feature below
+# and PDFIUM_RELEASE in src/pdf.rs (and the fetch scripts) must name the same
+# build: a newer pdfium.dll can be missing or have changed functions.
+pdfium-render = { version = "=0.8.37", optional = true, default-features = false, features = [
+    "pdfium_7543",
+    "thread_safe",
+] }
+
+[dev-dependencies]
+ron = "0.12"

@@ -1,0 +1,12 @@
+[package]
+name = "tspl-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Driverless TSPL label printing: raster encoding, transports and printer discovery"
+
+[lints]
+workspace = true
+
+[dependencies]
