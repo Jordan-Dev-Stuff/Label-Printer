@@ -32,6 +32,10 @@ const SCAN_TIME: Duration = Duration::from_secs(6);
 const DISCOVERY_RETRIES: u32 = 4;
 /// Wait between those reads (about 8 s in total).
 const DISCOVERY_RETRY_DELAY: Duration = Duration::from_secs(2);
+/// Connection attempts before giving up on a dropped LE connection.
+const CONNECT_ATTEMPTS: u32 = 3;
+/// Wait between connection attempts.
+const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(1500);
 /// Longest scan when looking for a remembered printer; it stops as soon as
 /// the printer is seen. The first scan after start-up can be slow on Windows.
 const RECONNECT_SCAN_TIME: Duration = Duration::from_secs(15);
@@ -397,19 +401,32 @@ async fn connect(adapter: &Adapter, id: &str) -> Result<Session, String> {
         .find(|candidate| format!("{:?}", candidate.id()) == id)
         .ok_or_else(|| "device is no longer in range; scan again".to_string())?;
 
-    let name = peripheral
-        .properties()
-        .await
-        .ok()
-        .flatten()
+    let properties = peripheral.properties().await.ok().flatten();
+    let address = properties
+        .as_ref()
+        .map(|p| p.address.to_string())
+        .unwrap_or_default();
+    let name = properties
         .and_then(|p| p.local_name)
         .unwrap_or_else(|| "Bluetooth printer".to_string());
 
-    if !peripheral.is_connected().await.unwrap_or(false) {
-        peripheral
-            .connect()
-            .await
-            .map_err(|error| friendly_connect_error(&name, &error.to_string()))?;
+    // BlueZ on Linux sometimes abandons an LE connection while setting it up
+    // ("le-connection-abort-by-local"); a second attempt usually succeeds.
+    let mut attempt = 0;
+    while !peripheral.is_connected().await.unwrap_or(false) {
+        attempt += 1;
+        match peripheral.connect().await {
+            Ok(()) => break,
+            Err(error) => {
+                let error = error.to_string();
+                if attempt < CONNECT_ATTEMPTS && is_transient_connect_error(&error) {
+                    let _ = peripheral.disconnect().await;
+                    tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+                    continue;
+                }
+                return Err(friendly_connect_error(&name, &address, &error));
+            }
+        }
     }
 
     // On Linux, BlueZ resolves services after the link is up. btleplug waits
@@ -498,9 +515,27 @@ pub fn describe_gatt(channels: &[ChannelInfo]) -> String {
     )
 }
 
-/// Turns BlueZ's connection errors into advice.
+/// Connection errors that are worth one more try: BlueZ dropped the link while
+/// setting it up, or a previous attempt was still finishing.
 #[must_use]
-pub fn friendly_connect_error(name: &str, error: &str) -> String {
+pub fn is_transient_connect_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    [
+        "le-connection-abort-by-local",
+        "connection-abort",
+        "software caused connection abort",
+        "in progress",
+        "connection timed out",
+        "br-connection-canceled",
+    ]
+    .iter()
+    .any(|pattern| lower.contains(pattern))
+}
+
+/// Turns BlueZ's connection errors into advice. `address` (may be empty) is
+/// the printer's Bluetooth address, for the `bluetoothctl` command.
+#[must_use]
+pub fn friendly_connect_error(name: &str, address: &str, error: &str) -> String {
     let lower = error.to_ascii_lowercase();
     if lower.contains("no more profiles") || lower.contains("profile unavailable") {
         // BlueZ: a Bluetooth Classic device with nothing it can connect to.
@@ -508,10 +543,19 @@ pub fn friendly_connect_error(name: &str, error: &str) -> String {
             "{name} is the printer's Bluetooth Classic side, which this app cannot use. \
              Connect to the entry whose name ends in -LE instead"
         )
-    } else if lower.contains("page timeout")
-        || lower.contains("host is down")
-        || lower.contains("timed out")
-    {
+    } else if is_transient_connect_error(error) {
+        let forget = if address.is_empty() {
+            "remove the printer in your Bluetooth settings".to_string()
+        } else {
+            format!("run: bluetoothctl remove {address}")
+        };
+        format!(
+            "{name} dropped the connection while it was being set up ({error}). Make sure \
+             no other computer or phone is connected to the printer, switch the printer off \
+             and on, and try again. If it keeps happening, clear Linux's saved state for it: \
+             {forget}, then scan again"
+        )
+    } else if lower.contains("page timeout") || lower.contains("host is down") {
         format!("{name} did not answer; check it is switched on and nearby, then try again")
     } else {
         format!("connect to {name}: {error}")
@@ -841,12 +885,55 @@ mod tests {
     fn bluez_errors_become_advice() {
         let message = friendly_connect_error(
             "BY-482BT_F2CE",
+            "",
             "org.bluez.Error.Failed: No more profiles to connect to",
         );
         assert!(message.contains("-LE"), "{message}");
-        let message = friendly_connect_error("X", "Page Timeout");
+
+        let message = friendly_connect_error(
+            "BY-482BT_F2CE-LE",
+            "DC:0D:30:87:F2:CE",
+            "org.bluez.Error.Failed: le-connection-abort-by-local",
+        );
+        assert!(
+            message.contains("bluetoothctl remove DC:0D:30:87:F2:CE"),
+            "{message}"
+        );
+        assert!(
+            message.contains("le-connection-abort-by-local"),
+            "{message}"
+        );
+        let without_address = friendly_connect_error("X", "", "le-connection-abort-by-local");
+        assert!(
+            without_address.contains("Bluetooth settings"),
+            "{without_address}"
+        );
+
+        let message = friendly_connect_error("X", "", "Page Timeout");
         assert!(message.contains("switched on"), "{message}");
-        assert_eq!(friendly_connect_error("X", "boom"), "connect to X: boom");
+        assert_eq!(
+            friendly_connect_error("X", "", "boom"),
+            "connect to X: boom"
+        );
+    }
+
+    #[test]
+    fn only_transient_errors_are_retried() {
+        for retry in [
+            "org.bluez.Error.Failed: le-connection-abort-by-local",
+            "Software caused connection abort",
+            "org.bluez.Error.InProgress: In Progress",
+        ] {
+            assert!(is_transient_connect_error(retry), "{retry}");
+        }
+        for give_up in [
+            "No more profiles to connect to",
+            "Page Timeout",
+            "Not authorized",
+            "",
+        ] {
+            assert!(!is_transient_connect_error(give_up), "{give_up}");
+        }
     }
 
     #[test]
