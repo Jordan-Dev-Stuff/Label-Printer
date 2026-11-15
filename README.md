@@ -91,9 +91,13 @@ and openSUSE Leap 15 are too old.
   ```
 
 USB printing uses the kernel's `usblp` driver (`/dev/usb/lp0`). If the printer
-is not found, run `sudo modprobe usblp`. Bluetooth printing needs BlueZ, which
-desktop distributions include. Dragging files onto the window may not work in
-Wayland sessions; use **Choose a file…** instead.
+is not found, run `sudo modprobe usblp`. When you plug the printer in, your
+desktop may offer to install a printer driver: you can ignore it, Label
+Printer does not use one. Bluetooth printing needs BlueZ, which desktop
+distributions include. The scan may show the printer twice; only the entry
+ending in `-LE` works, and the app hides the other when both appear.
+Dragging files onto the window may not work in Wayland sessions; use
+**Choose a file…** instead.
 
 **macOS (untested).** Unzip and drag *Label Printer* to Applications. The app
 is not notarised by Apple, so the first time, right-click it and choose

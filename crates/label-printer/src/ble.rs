@@ -28,6 +28,10 @@ const FAST_PACING: Duration = Duration::from_millis(4);
 const SYNC_EVERY: usize = 16;
 /// Longest scan.
 const SCAN_TIME: Duration = Duration::from_secs(6);
+/// Extra service reads when the first comes back without a print channel.
+const DISCOVERY_RETRIES: u32 = 4;
+/// Wait between those reads (about 8 s in total).
+const DISCOVERY_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// Longest scan when looking for a remembered printer; it stops as soon as
 /// the printer is seen. The first scan after start-up can be slow on Windows.
 const RECONNECT_SCAN_TIME: Duration = Duration::from_secs(15);
@@ -362,6 +366,7 @@ async fn scan(
     }
 
     let _ = adapter.stop_scan().await;
+    let mut found = hide_classic_twins(found);
     found.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(found)
 }
@@ -404,29 +409,38 @@ async fn connect(adapter: &Adapter, id: &str) -> Result<Session, String> {
         peripheral
             .connect()
             .await
-            .map_err(|error| format!("connect to {name}: {error}"))?;
+            .map_err(|error| friendly_connect_error(&name, &error.to_string()))?;
     }
-    peripheral
-        .discover_services()
-        .await
-        .map_err(|error| format!("read services of {name}: {error}"))?;
 
-    let characteristics: Vec<Characteristic> = peripheral.characteristics().into_iter().collect();
-    let infos: Vec<ChannelInfo> = characteristics
-        .iter()
-        .map(|c| ChannelInfo {
-            uuid: c.uuid.to_string(),
-            service: c.service_uuid.to_string(),
-            write: c.properties.contains(CharPropFlags::WRITE),
-            write_without_response: c.properties.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE),
-        })
-        .collect();
+    // On Linux, BlueZ resolves services after the link is up. btleplug waits
+    // for that inside connect(), but not when the link was already open (a
+    // desktop Bluetooth panel, or an earlier attempt), so the first read can
+    // come back empty. Read again a few times before giving up.
+    let mut characteristics: Vec<Characteristic> = Vec::new();
+    let mut infos: Vec<ChannelInfo> = Vec::new();
+    let mut chosen = None;
+    for attempt in 0..=DISCOVERY_RETRIES {
+        if attempt > 0 {
+            tokio::time::sleep(DISCOVERY_RETRY_DELAY).await;
+        }
+        peripheral
+            .discover_services()
+            .await
+            .map_err(|error| format!("read services of {name}: {error}"))?;
+        characteristics = peripheral.characteristics().into_iter().collect();
+        infos = characteristics.iter().map(channel_info).collect();
+        chosen = choose_channel(&infos);
+        if chosen.is_some() {
+            break;
+        }
+    }
 
-    let Some(index) = choose_channel(&infos) else {
+    let Some(index) = chosen else {
         let _ = peripheral.disconnect().await;
         return Err(format!(
-            "{name} has no printer data channel; it may not be a printer, or it may only \
-             support Bluetooth Classic"
+            "{name} has no printer data channel ({}). It may not be a printer, or it may \
+             only support Bluetooth Classic",
+            describe_gatt(&infos)
         ));
     };
 
@@ -435,6 +449,92 @@ async fn connect(adapter: &Adapter, id: &str) -> Result<Session, String> {
         peripheral,
         name,
     })
+}
+
+fn channel_info(c: &Characteristic) -> ChannelInfo {
+    ChannelInfo {
+        uuid: c.uuid.to_string(),
+        service: c.service_uuid.to_string(),
+        write: c.properties.contains(CharPropFlags::WRITE),
+        write_without_response: c.properties.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE),
+    }
+}
+
+/// Short summary of a GATT table for error messages and bug reports:
+/// `services 1800, 49535343-fe7d-…; writable: 2a00`.
+#[must_use]
+pub fn describe_gatt(channels: &[ChannelInfo]) -> String {
+    if channels.is_empty() {
+        return "no services were reported".to_string();
+    }
+    let short = |uuid: &str| {
+        let lower = uuid.to_ascii_lowercase();
+        // 0000xxxx-0000-1000-8000-00805f9b34fb is a 16-bit Bluetooth SIG UUID.
+        if lower.len() == 36
+            && lower.starts_with("0000")
+            && lower.ends_with("-0000-1000-8000-00805f9b34fb")
+        {
+            lower[4..8].to_string()
+        } else {
+            lower
+        }
+    };
+    let mut services: Vec<String> = channels.iter().map(|c| short(&c.service)).collect();
+    services.sort();
+    services.dedup();
+    let writable: Vec<String> = channels
+        .iter()
+        .filter(|c| c.write || c.write_without_response)
+        .map(|c| short(&c.uuid))
+        .collect();
+    format!(
+        "services {}; writable: {}",
+        services.join(", "),
+        if writable.is_empty() {
+            "none".to_string()
+        } else {
+            writable.join(", ")
+        }
+    )
+}
+
+/// Turns BlueZ's connection errors into advice.
+#[must_use]
+pub fn friendly_connect_error(name: &str, error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("no more profiles") || lower.contains("profile unavailable") {
+        // BlueZ: a Bluetooth Classic device with nothing it can connect to.
+        format!(
+            "{name} is the printer's Bluetooth Classic side, which this app cannot use. \
+             Connect to the entry whose name ends in -LE instead"
+        )
+    } else if lower.contains("page timeout")
+        || lower.contains("host is down")
+        || lower.contains("timed out")
+    {
+        format!("{name} did not answer; check it is switched on and nearby, then try again")
+    } else {
+        format!("connect to {name}: {error}")
+    }
+}
+
+/// Hides a device when another one in the list has the same name plus `-LE`.
+///
+/// Dual-mode printers advertise twice: `BY-482BT_F2CE` (Bluetooth Classic) and
+/// `BY-482BT_F2CE-LE` (Bluetooth LE). Linux lists both; only the LE one works.
+#[must_use]
+pub fn hide_classic_twins(devices: Vec<DeviceInfo>) -> Vec<DeviceInfo> {
+    let le_names: Vec<String> = devices
+        .iter()
+        .filter_map(|d| {
+            let lower = d.name.to_ascii_lowercase();
+            lower.strip_suffix("-le").map(str::to_string)
+        })
+        .collect();
+    devices
+        .into_iter()
+        .filter(|d| !le_names.contains(&d.name.to_ascii_lowercase()))
+        .collect()
 }
 
 /// What [`choose_channel`] needs to know about a characteristic.
@@ -703,5 +803,74 @@ mod tests {
         assert_eq!(find_remembered(&devices, "nope", "BY-482BT_0000-LE"), None);
         assert_eq!(find_remembered(&[device("x", "")], "nope", ""), None);
         assert_eq!(find_remembered(&[], "x", "y"), None);
+    }
+
+    #[test]
+    fn classic_twins_are_hidden_but_other_devices_stay() {
+        let devices = vec![
+            device("a", "BY-482BT_F2CE"),
+            device("b", "BY-482BT_F2CE-LE"),
+            device("c", "Soundcore"),
+            device("d", "Printer-LE-Edition"),
+        ];
+        let names: Vec<String> = hide_classic_twins(devices)
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["BY-482BT_F2CE-LE", "Soundcore", "Printer-LE-Edition"]
+        );
+
+        // A Classic name with no LE twin is kept, and case does not matter.
+        let names: Vec<String> = hide_classic_twins(vec![
+            device("a", "by-482bt_f2ce"),
+            device("b", "BY-482BT_F2CE-le"),
+        ])
+        .into_iter()
+        .map(|d| d.name)
+        .collect();
+        assert_eq!(names, ["BY-482BT_F2CE-le"]);
+        assert_eq!(
+            hide_classic_twins(vec![device("a", "BY-482BT_F2CE")]).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn bluez_errors_become_advice() {
+        let message = friendly_connect_error(
+            "BY-482BT_F2CE",
+            "org.bluez.Error.Failed: No more profiles to connect to",
+        );
+        assert!(message.contains("-LE"), "{message}");
+        let message = friendly_connect_error("X", "Page Timeout");
+        assert!(message.contains("switched on"), "{message}");
+        assert_eq!(friendly_connect_error("X", "boom"), "connect to X: boom");
+    }
+
+    #[test]
+    fn gatt_summaries_shorten_standard_uuids() {
+        let channels = [
+            channel(DEVICE_NAME, GAP, true, false),
+            channel(
+                "49535343-8841-43f4-a8d4-ecbe34729bb3",
+                "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+                true,
+                true,
+            ),
+            channel(
+                "00002a29-0000-1000-8000-00805f9b34fb",
+                "0000180a-0000-1000-8000-00805f9b34fb",
+                false,
+                false,
+            ),
+        ];
+        assert_eq!(
+            describe_gatt(&channels),
+            "services 1800, 180a, 49535343-fe7d-4ae5-8fa9-9fafd205e455; \
+             writable: 2a00, 49535343-8841-43f4-a8d4-ecbe34729bb3"
+        );
+        assert_eq!(describe_gatt(&[]), "no services were reported");
     }
 }
