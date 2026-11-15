@@ -18,10 +18,10 @@
 
    The library lands in `vendor/pdfium/<os>-<arch>/`, which is gitignored.
 
-3. Linux only, system libraries for the window, file dialog and Bluetooth:
+3. Linux only, system libraries for the window and Bluetooth:
 
    ```bash
-   sudo apt-get install -y pkg-config libdbus-1-dev libgtk-3-dev libxkbcommon-dev \
+   sudo apt-get install -y pkg-config libdbus-1-dev libxkbcommon-dev \
      libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
    ```
 
@@ -101,7 +101,8 @@ Platform notes:
   `crates/label-printer/build.rs` (`winresource`), from
   `assets/label-printer.ico`. Shortcuts take their icon from the exe.
 - **Linux:** built on Ubuntu 22.04 so it needs only glibc 2.35. Runtime
-  needs GTK 3 and D-Bus (present on desktop distributions).
+  needs D-Bus, xkbcommon and EGL/OpenGL, plus xdg-desktop-portal for the
+  file dialog (all present on desktop distributions; GTK is not used).
   - The `.deb` is made by `cargo-deb` from `[package.metadata.deb]` in
     `crates/label-printer/Cargo.toml`. Its dependencies are worked out from
     the binaries' shared libraries. It installs
@@ -110,7 +111,7 @@ Platform notes:
     root or the `lp` group; `packaging/linux/debian/postinst` reloads udev
     so it applies to a printer that is already plugged in.
   - The AppImage is made by `appimagetool` (pinned to 1.9.1). The runtime is
-    static, so users do not need FUSE 2. GTK and D-Bus are not bundled; they
+    static, so users do not need FUSE 2. System libraries are not bundled; they
     come from the host, like the plain binary.
   - Before uploading, the job runs the packaged `label-printer --render` on
     the regression PDF from both the `.deb` and the AppImage, and checks that

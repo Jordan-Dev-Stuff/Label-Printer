@@ -67,8 +67,9 @@ and openSUSE Leap 15 are too old.
   what it needs, adds Label Printer to the applications menu, and installs a
   udev rule so you can print over USB without root or joining a group.
 - **AppImage:** make it executable and run it:
-  `chmod +x Label-Printer-*.AppImage && ./Label-Printer-*.AppImage`. It needs
-  GTK 3 and D-Bus, which desktop distributions include. For USB printing,
+  `chmod +x Label-Printer-*.AppImage && ./Label-Printer-*.AppImage`. It uses
+  the desktop's own libraries and file dialog (xdg-desktop-portal), which
+  desktop distributions include. For USB printing,
   install the udev rule once (it ships inside the AppImage):
 
   ```bash

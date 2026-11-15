@@ -67,10 +67,12 @@ copyright = "2026, Label Printer contributors"
 license-file = ["../../LICENSE", "0"]
 section = "utils"
 priority = "optional"
-# $auto: worked out from the binaries' shared libraries (GTK 3, D-Bus, …).
-depends = "$auto"
-# BlueZ is only needed for Bluetooth printing; USB works without it.
-recommends = "bluez"
+# $auto: worked out from the binaries' shared libraries (glibc, D-Bus). The
+# window loads xkbcommon and EGL/OpenGL at run time, so they are listed by hand.
+depends = "$auto, libxkbcommon0, libegl1 | libgl1"
+# BlueZ is only needed for Bluetooth printing; USB works without it. The
+# file dialog is the desktop's own, through xdg-desktop-portal.
+recommends = "bluez, xdg-desktop-portal"
 extended-description = """\
 Print PDFs and images on a PEDOOLO / BEEPRT BY-482BT TSPL label printer with \
 no printer driver, over USB or Bluetooth LE. Shipping labels on a full page \
