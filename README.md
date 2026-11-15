@@ -126,7 +126,7 @@ cargo test --all
 ```
 
 The installer is built with Inno Setup 6:
-`iscc /DAppVersion=0.3.0 installer\label-printer.iss`. Releases are built by
+`iscc /DAppVersion=0.3.1 installer\label-printer.iss`. Releases are built by
 GitHub Actions when a `v*` tag is pushed. See
 [docs/development.md](docs/development.md).
 

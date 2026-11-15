@@ -78,8 +78,8 @@ and on demand, on `windows-latest`, `ubuntu-latest` and `macos-latest`:
 2. Commit, then tag and push:
 
    ```bash
-   git tag v0.3.0
-   git push origin v0.3.0
+   git tag v0.3.1
+   git push origin v0.3.1
    ```
 
 `.github/workflows/release.yml` checks that the tag matches `Cargo.toml`, then
@@ -110,7 +110,11 @@ Platform notes:
     `/dev/usb/lpN` with `uaccess` so the logged-in user can print without
     root or the `lp` group; `packaging/linux/debian/postinst` reloads udev
     so it applies to a printer that is already plugged in.
-  - The AppImage is made by `appimagetool` (pinned to 1.9.1). The runtime is
+  - The AppImage is made by `appimagetool` (pinned to 1.9.1) with
+    `--comp gzip`: the default zstd cannot be read by the libappimage in
+    AppImageLauncher and similar menu-integration tools ("Failed to register
+    AppImage in system via libappimage"). The release job checks the
+    compression and the root desktop entry and icon. The runtime is
     static, so users do not need FUSE 2. System libraries are not bundled; they
     come from the host, like the plain binary.
   - Before uploading, the job runs the packaged `label-printer --render` on
@@ -141,7 +145,7 @@ To build the installer locally, install Inno Setup 6, then:
 
 ```powershell
 cargo build --release --locked
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.3.0 installer\label-printer.iss
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.3.1 installer\label-printer.iss
 ```
 
 The installer is written to `target\installer\`.

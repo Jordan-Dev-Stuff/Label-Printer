@@ -1,7 +1,7 @@
 # Builds a release when you push a version tag:
 #
-#   git tag v0.3.0
-#   git push origin v0.3.0
+#   git tag v0.3.1
+#   git push origin v0.3.1
 #
 # The tag must match `version` under [workspace.package] in Cargo.toml. The
 # GitHub Release gets:
@@ -152,6 +152,12 @@ jobs:
 
       # Any distribution: one executable file. The runtime is static, so no
       # FUSE 2 library is needed on the user's machine.
+      #
+      # Compressed with gzip, not appimagetool's default zstd: the libappimage
+      # inside AppImageLauncher (and similar "integrate into the menu" tools)
+      # cannot read zstd and fails with "Failed to register AppImage in system
+      # via libappimage". VERSION goes into the desktop entry
+      # (X-AppImage-Version), which those tools display.
       - name: AppImage
         run: |
           v="${{ needs.version.outputs.version }}"
@@ -170,7 +176,8 @@ jobs:
           curl -fsSL -o appimagetool \
             https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
           chmod +x appimagetool
-          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool "$app" "dist/Label-Printer-$v-linux-x86_64.AppImage"
+          ARCH=x86_64 VERSION="$v" APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./appimagetool --comp gzip "$app" "dist/Label-Printer-$v-linux-x86_64.AppImage"
           ls -l dist
 
       # The first time the packaged app itself runs on Linux: render the
@@ -185,6 +192,16 @@ jobs:
           deb-root/usr/bin/tspl-rs print --target file:deb-card.tspl --pattern testcard
           APPIMAGE_EXTRACT_AND_RUN=1 "dist/Label-Printer-$v-linux-x86_64.AppImage" --render "$fixture" --out appimage-render.png
           test -s deb-render.png && test -s appimage-render.png && test "$(stat -c %s deb-card.tspl)" -eq 124371
+
+          # Menu-integration tools must be able to read the AppImage: gzip
+          # squashfs, and a desktop entry and icon at its root.
+          appimage="dist/Label-Printer-$v-linux-x86_64.AppImage"
+          offset="$("$appimage" --appimage-offset)"
+          sudo apt-get install -y squashfs-tools
+          unsquashfs -s -o "$offset" "$appimage" | tee squashfs-info.txt
+          grep -q "Compression gzip" squashfs-info.txt
+          unsquashfs -l -o "$offset" "$appimage" | grep -E "^squashfs-root/(label-printer\.desktop|label-printer\.png|AppRun)$" | tee root-files.txt
+          test "$(wc -l < root-files.txt)" -eq 3
 
       - uses: actions/upload-artifact@v4
         with:

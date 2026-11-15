@@ -3,7 +3,7 @@
 ; Build (from the repository root, after fetching pdfium once):
 ;   powershell -ExecutionPolicy Bypass -File scripts\fetch-pdfium.ps1
 ;   cargo build --release --locked
-;   iscc /DAppVersion=0.3.0 installer\label-printer.iss
+;   iscc /DAppVersion=0.3.1 installer\label-printer.iss
 ; The installer lands in target\installer\. The release workflow
 ; (.github/workflows/release.yml) runs exactly these steps.
 ;
