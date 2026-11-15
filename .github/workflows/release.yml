@@ -188,8 +188,10 @@ jobs:
       - name: .rpm
         run: |
           v="${{ needs.version.outputs.version }}"
-          # RPM versions may not contain "-" (e.g. 0.3.1-test).
-          rpm_version="${v//-/_}"
+          # RPM versions may not contain "-". Use "~", which RPM sorts *before*
+          # the plain version, so 0.3.2~test upgrades cleanly to 0.3.2 ("_" would
+          # sort after it and block the upgrade).
+          rpm_version="$(printf %s "$v" | tr - "~")"
           cargo generate-rpm -p crates/label-printer \
             --set-metadata "version = \"$rpm_version\"" \
             -o "dist/Label-Printer-$v-linux-x86_64.rpm"

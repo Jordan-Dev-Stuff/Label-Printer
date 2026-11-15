@@ -116,7 +116,8 @@ Platform notes:
     xkbcommon and EGL are required by soname (`libEGL.so.1()(64bit)`), so the
     same package works whatever a distribution calls those libraries.
     `packaging/linux/rpm/post-install.sh` reloads udev. RPM versions cannot
-    contain `-`, so a test build such as `0.3.1-test` becomes `0.3.1_test`.
+    contain `-`, so a test build such as `0.3.2-test` becomes `0.3.2~test`,
+    which RPM sorts before `0.3.2` so the real release upgrades it.
   - The AppImage is made by `appimagetool` (pinned to 1.9.1). It only
     produces **zstd**-compressed AppImages, the AppImage project's current
     standard (its bundled `mksquashfs` has no other compressor). Tools that
