@@ -91,6 +91,7 @@ builds on three runners in parallel (each runs the tests and builds with
 | `Label-Printer-<version>-setup.exe` | `windows-latest` | Per-user installer (no admin prompt), Inno Setup |
 | `Label-Printer-<version>-windows-x64-portable.zip` | `windows-latest` | `label-printer.exe`, `tspl-rs.exe`, README, licenses |
 | `Label-Printer-<version>-linux-amd64.deb` | `ubuntu-22.04` | Both programs, menu entry, icon, USB udev rule; dependencies declared |
+| `Label-Printer-<version>-linux-x86_64.rpm` | `ubuntu-22.04` | Same as the .deb, for Fedora and openSUSE |
 | `Label-Printer-<version>-linux-x86_64.AppImage` | `ubuntu-22.04` | Both programs in one executable file, any distro |
 | `Label-Printer-<version>-macos-universal.zip` | `macos-latest` | `Label Printer.app` (Apple Silicon + Intel), `tspl-rs` |
 | `SHA256SUMS.txt` | | Checksums of all of the above |
@@ -110,16 +111,24 @@ Platform notes:
     `/dev/usb/lpN` with `uaccess` so the logged-in user can print without
     root or the `lp` group; `packaging/linux/debian/postinst` reloads udev
     so it applies to a printer that is already plugged in.
-  - The AppImage is made by `appimagetool` (pinned to 1.9.1) with
-    `--comp gzip`: the default zstd cannot be read by the libappimage in
-    AppImageLauncher and similar menu-integration tools ("Failed to register
-    AppImage in system via libappimage"). The release job checks the
-    compression and the root desktop entry and icon. The runtime is
-    static, so users do not need FUSE 2. System libraries are not bundled; they
-    come from the host, like the plain binary.
+  - The `.rpm` (Fedora, openSUSE) is made by `cargo-generate-rpm` from
+    `[package.metadata.generate-rpm]`, with the same files and udev rule.
+    xkbcommon and EGL are required by soname (`libEGL.so.1()(64bit)`), so the
+    same package works whatever a distribution calls those libraries.
+    `packaging/linux/rpm/post-install.sh` reloads udev. RPM versions cannot
+    contain `-`, so a test build such as `0.3.1-test` becomes `0.3.1_test`.
+  - The AppImage is made by `appimagetool` (pinned to 1.9.1). It only
+    produces **zstd**-compressed AppImages, the AppImage project's current
+    standard (its bundled `mksquashfs` has no other compressor). Tools that
+    add AppImages to the menu need zstd support: Gear Lever and
+    AppImageLauncher 3 have it; AppImageLauncher 2.x fails with "Failed to
+    register AppImage in system via libappimage". The AppImage itself runs
+    either way. The runtime is static, so users do not need FUSE 2. System
+    libraries are not bundled; they come from the host.
   - Before uploading, the job runs the packaged `label-printer --render` on
-    the regression PDF from both the `.deb` and the AppImage, and checks that
-    `tspl-rs` writes the reference 124,371-byte job.
+    the regression PDF from the `.deb`, the `.rpm` and the AppImage, checks
+    that `tspl-rs` writes the reference 124,371-byte job, and checks the
+    AppImage has the desktop entry, icon and `AppRun` at its root.
 - **macOS:** each architecture embeds its own pdfium, then `lipo` joins them.
   The `.icns` is made by `iconutil` from the PNGs the app exports
   (`--export-icons`). `Info.plist` carries the Bluetooth permission text,

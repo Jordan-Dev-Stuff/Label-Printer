@@ -89,3 +89,36 @@ assets = [
     ["../../README.md", "usr/share/doc/label-printer/", "644"],
     ["../../vendor/pdfium/linux-x86_64/LICENSE", "usr/share/doc/label-printer/LICENSE-pdfium", "644"],
 ]
+
+# `cargo generate-rpm -p label-printer` after `cargo build --release`
+# (the release workflow does this) for Fedora, openSUSE and other RPM
+# distributions. Same contents as the .deb. Sources are relative to the
+# repository root.
+[package.metadata.generate-rpm]
+name = "label-printer"
+summary = "Print PDFs and images on a TSPL label printer, no driver needed"
+license = "MIT"
+url = "https://github.com/Jordan-Dev-Stuff/Label-Printer"
+post_install_script = "packaging/linux/rpm/post-install.sh"
+post_uninstall_script = "packaging/linux/rpm/post-uninstall.sh"
+assets = [
+    { source = "target/release/label-printer", dest = "/usr/bin/label-printer", mode = "755" },
+    { source = "target/release/tspl-rs", dest = "/usr/bin/tspl-rs", mode = "755" },
+    { source = "packaging/linux/label-printer.desktop", dest = "/usr/share/applications/label-printer.desktop", mode = "644" },
+    { source = "assets/label-printer.png", dest = "/usr/share/icons/hicolor/256x256/apps/label-printer.png", mode = "644" },
+    { source = "packaging/linux/70-label-printer.rules", dest = "/usr/lib/udev/rules.d/70-label-printer.rules", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/label-printer/README.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/licenses/label-printer/LICENSE", mode = "644", doc = true },
+    { source = "vendor/pdfium/linux-x86_64/LICENSE", dest = "/usr/share/licenses/label-printer/LICENSE-pdfium", mode = "644", doc = true },
+]
+
+# glibc and D-Bus are found automatically from the binaries. The window loads
+# xkbcommon and EGL at run time, so they are named by soname: that works on
+# Fedora and openSUSE alike, whatever the package is called there.
+[package.metadata.generate-rpm.requires]
+"libxkbcommon.so.0()(64bit)" = "*"
+"libEGL.so.1()(64bit)" = "*"
+
+[package.metadata.generate-rpm.recommends]
+bluez = "*"
+xdg-desktop-portal = "*"

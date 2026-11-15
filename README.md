@@ -50,6 +50,7 @@ Every download is self-contained: nothing else is installed or downloaded.
 | --- | --- | --- |
 | Windows 10/11 (x64) | `Label-Printer-<version>-setup.exe`, or the `windows-x64-portable.zip` | Tested |
 | Debian, Ubuntu, Mint, Pop!_OS (amd64) | `Label-Printer-<version>-linux-amd64.deb` | Untested |
+| Fedora, openSUSE (x86_64) | `Label-Printer-<version>-linux-x86_64.rpm` | Untested |
 | Other Linux (x86_64) | `Label-Printer-<version>-linux-x86_64.AppImage` | Untested |
 | macOS 11+ (Apple Silicon and Intel) | `Label-Printer-<version>-macos-universal.zip` | Untested |
 
@@ -62,14 +63,25 @@ right-click menu of PDF files. Or unzip the portable zip and run
 Debian 12+, Mint 21+, Fedora 36+, Arch and other rolling distributions. RHEL 9
 and openSUSE Leap 15 are too old.
 
-- **`.deb`:** open it with your software installer, or run
+- **`.deb` (Debian, Ubuntu, Mint, Pop!_OS):** open it with your software
+  installer, or run
   `sudo apt install ./Label-Printer-<version>-linux-amd64.deb`. It pulls in
   what it needs, adds Label Printer to the applications menu, and installs a
   udev rule so you can print over USB without root or joining a group.
-- **AppImage:** make it executable and run it:
+- **`.rpm` (Fedora, openSUSE):** the same, for RPM-based systems. Open it with
+  your software installer, or run
+  `sudo dnf install ./Label-Printer-<version>-linux-x86_64.rpm` (Fedora) or
+  `sudo zypper install ./Label-Printer-<version>-linux-x86_64.rpm` (openSUSE).
+  A `.deb` does not install on Fedora, and an `.rpm` does not install on
+  Ubuntu.
+- **AppImage (any distribution):** make it executable and run it:
   `chmod +x Label-Printer-*.AppImage && ./Label-Printer-*.AppImage`. It uses
   the desktop's own libraries and file dialog (xdg-desktop-portal), which
-  desktop distributions include. For USB printing,
+  desktop distributions include. AppImages are now zstd-compressed, so tools
+  that add them to the menu must support that: use
+  [Gear Lever](https://flathub.org/apps/it.mijorus.gearlever) or
+  AppImageLauncher 3. AppImageLauncher 2.x shows "Failed to register AppImage
+  in system via libappimage", but the AppImage still runs. For USB printing,
   install the udev rule once (it ships inside the AppImage):
 
   ```bash
@@ -141,7 +153,7 @@ crates/
 assets/            app icon (.ico embedded in the Windows exe, .png)
 docs/              protocol reference, transports, architecture, development
 installer/         Windows installer (Inno Setup)
-packaging/         Linux .desktop entry, udev rule, .deb scripts; macOS Info.plist
+packaging/         Linux .desktop entry, udev rule, .deb/.rpm scripts; macOS Info.plist
 scripts/           fetch-pdfium.ps1 / .sh (build machines only)
 vendor/pdfium/     fetched PDF renderer, embedded at build time (not committed)
 ```

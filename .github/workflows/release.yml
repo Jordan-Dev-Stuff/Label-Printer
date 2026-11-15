@@ -8,6 +8,7 @@
 #   Label-Printer-<v>-setup.exe                 Windows installer (per-user, no admin)
 #   Label-Printer-<v>-windows-x64-portable.zip  Windows, no install
 #   Label-Printer-<v>-linux-amd64.deb           Debian/Ubuntu package (untested)
+#   Label-Printer-<v>-linux-x86_64.rpm          Fedora/openSUSE package (untested)
 #   Label-Printer-<v>-linux-x86_64.AppImage     Linux, any distro (untested)
 #   Label-Printer-<v>-macos-universal.zip       macOS app, Apple Silicon + Intel (untested)
 #   SHA256SUMS.txt                              checksums of all of the above
@@ -151,13 +152,11 @@ jobs:
           dpkg-deb --contents "dist/Label-Printer-$v-linux-amd64.deb"
 
       # Any distribution: one executable file. The runtime is static, so no
-      # FUSE 2 library is needed on the user's machine.
-      #
-      # Compressed with gzip, not appimagetool's default zstd: the libappimage
-      # inside AppImageLauncher (and similar "integrate into the menu" tools)
-      # cannot read zstd and fails with "Failed to register AppImage in system
-      # via libappimage". VERSION goes into the desktop entry
-      # (X-AppImage-Version), which those tools display.
+      # FUSE 2 library is needed on the user's machine. appimagetool only
+      # produces zstd-compressed AppImages (the AppImage project's current
+      # standard); menu-integration tools need zstd support for them, e.g.
+      # Gear Lever or AppImageLauncher 3, not AppImageLauncher 2.x. VERSION
+      # goes into the desktop entry (X-AppImage-Version).
       - name: AppImage
         run: |
           v="${{ needs.version.outputs.version }}"
@@ -177,29 +176,53 @@ jobs:
             https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
           chmod +x appimagetool
           ARCH=x86_64 VERSION="$v" APPIMAGE_EXTRACT_AND_RUN=1 \
-            ./appimagetool --comp gzip "$app" "dist/Label-Printer-$v-linux-x86_64.AppImage"
+            ./appimagetool "$app" "dist/Label-Printer-$v-linux-x86_64.AppImage"
           ls -l dist
 
-      # The first time the packaged app itself runs on Linux: render the
-      # regression PDF headlessly through the embedded pdfium, once from the
-      # .deb's files and once through the AppImage.
+      # Fedora, openSUSE and other RPM distributions: same contents as the
+      # .deb, including the USB udev rule.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-generate-rpm@0.21.1
+
+      - name: .rpm
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          # RPM versions may not contain "-" (e.g. 0.3.1-test).
+          rpm_version="${v//-/_}"
+          cargo generate-rpm -p label-printer \
+            --set-metadata "version = \"$rpm_version\"" \
+            -o "dist/Label-Printer-$v-linux-x86_64.rpm"
+          sudo apt-get install -y rpm
+          rpm -qip "dist/Label-Printer-$v-linux-x86_64.rpm"
+          echo "Requires:"; rpm -qp --requires "dist/Label-Printer-$v-linux-x86_64.rpm"
+          echo "Recommends:"; rpm -qp --recommends "dist/Label-Printer-$v-linux-x86_64.rpm"
+          rpm -qlp "dist/Label-Printer-$v-linux-x86_64.rpm"
+
+      # The packaged app runs on Linux: render the regression PDF headlessly
+      # through the embedded pdfium from each package, and check the AppImage
+      # has the root desktop entry, icon and entry point integration tools read.
       - name: Smoke test the packages
         run: |
           v="${{ needs.version.outputs.version }}"
           fixture=crates/label-printer/tests/fixtures/letter-with-4x6-label.pdf
+
           dpkg-deb -x "dist/Label-Printer-$v-linux-amd64.deb" deb-root
           deb-root/usr/bin/label-printer --render "$fixture" --out deb-render.png
           deb-root/usr/bin/tspl-rs print --target file:deb-card.tspl --pattern testcard
-          APPIMAGE_EXTRACT_AND_RUN=1 "dist/Label-Printer-$v-linux-x86_64.AppImage" --render "$fixture" --out appimage-render.png
-          test -s deb-render.png && test -s appimage-render.png && test "$(stat -c %s deb-card.tspl)" -eq 124371
+          test "$(stat -c %s deb-card.tspl)" -eq 124371
 
-          # Menu-integration tools must be able to read the AppImage: gzip
-          # squashfs, and a desktop entry and icon at its root.
+          mkdir rpm-root
+          (cd rpm-root && rpm2cpio "../dist/Label-Printer-$v-linux-x86_64.rpm" | cpio -idm --quiet)
+          rpm-root/usr/bin/label-printer --render "$fixture" --out rpm-render.png
+          test -f rpm-root/usr/lib/udev/rules.d/70-label-printer.rules
+
           appimage="dist/Label-Printer-$v-linux-x86_64.AppImage"
-          offset="$("$appimage" --appimage-offset)"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --render "$fixture" --out appimage-render.png
+          test -s deb-render.png && test -s rpm-render.png && test -s appimage-render.png
+
           sudo apt-get install -y squashfs-tools
-          unsquashfs -s -o "$offset" "$appimage" | tee squashfs-info.txt
-          grep -q "Compression gzip" squashfs-info.txt
+          offset="$("$appimage" --appimage-offset)"
           unsquashfs -l -o "$offset" "$appimage" | grep -E "^squashfs-root/(label-printer\.desktop|label-printer\.png|AppRun)$" | tee root-files.txt
           test "$(wc -l < root-files.txt)" -eq 3
 
