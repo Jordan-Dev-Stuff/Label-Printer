@@ -1,6 +1,6 @@
 //! Driverless printing for TSPL label printers.
 //!
-//! This crate is the engine behind `thermal-rs`. It takes an 8-bit grayscale
+//! This crate is the engine behind Label Printer. It takes an 8-bit grayscale
 //! [`Frame`], halftones it, encodes a TSPL/TSPL2 job and delivers it to a file,
 //! a serial port or a spooler queue — no vendor driver in the path.
 //!

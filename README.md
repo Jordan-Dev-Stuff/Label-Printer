@@ -1,5 +1,7 @@
 # Label Printer
 
+<img src="assets/label-printer.png" alt="Label Printer icon" width="96" align="right">
+
 > [!WARNING]
 > **This only works with one printer: the PEDOOLO BY-482BT.** It is the only
 > printer this has been built and tested against. Other TSPL label printers
@@ -7,12 +9,17 @@
 > languages (ZPL, ESC/POS, …) will not work. Use it with any other printer at
 > your own risk.
 
+> [!NOTE]
+> **Windows is the only tested platform.** Linux and macOS builds are
+> published with every release and pass the automated tests, but they have
+> never been tried with a real printer. Reports are welcome.
+
 Print shipping labels and other PDFs or images on TSPL thermal label printers
 (PEDOOLO / BEEPRT BY-482BT and similar) **with no printer driver at all**:
 not the vendor's, and not Windows' *Generic / Text Only* either. The app talks
 to the printer directly over USB or Bluetooth LE.
 
-![thermal-rs main window](docs/screenshots/main-window.png)
+![Label Printer main window](docs/screenshots/main-window.png)
 
 ## Features
 
@@ -35,20 +42,60 @@ to the printer directly over USB or Bluetooth LE.
 
 ## Install
 
-Download `thermal-rs-<version>-setup.exe` from
-[Releases](https://github.com/Jordan-Dev-Stuff/Label-Printer/releases) and run
-it. It installs for the current user (no administrator prompt) and can add
-*Print label with thermal-rs* to the right-click menu of PDF files. A portable
-zip is published alongside it.
+Downloads are on the
+[Releases](https://github.com/Jordan-Dev-Stuff/Label-Printer/releases) page.
+Every download is self-contained: nothing else is installed or downloaded.
+
+| Platform | Download | Status |
+| --- | --- | --- |
+| Windows 10/11 (x64) | `Label-Printer-<version>-setup.exe`, or the `windows-x64-portable.zip` | Tested |
+| Debian, Ubuntu, Mint, Pop!_OS (amd64) | `Label-Printer-<version>-linux-amd64.deb` | Untested |
+| Other Linux (x86_64) | `Label-Printer-<version>-linux-x86_64.AppImage` | Untested |
+| macOS 11+ (Apple Silicon and Intel) | `Label-Printer-<version>-macos-universal.zip` | Untested |
+
+**Windows.** Run the installer. It installs for the current user (no
+administrator prompt) and can add *Print with Label Printer* to the
+right-click menu of PDF files. Or unzip the portable zip and run
+`label-printer.exe`.
+
+**Linux (untested).** Both packages need glibc 2.35 or newer: Ubuntu 22.04+,
+Debian 12+, Mint 21+, Fedora 36+, Arch and other rolling distributions. RHEL 9
+and openSUSE Leap 15 are too old.
+
+- **`.deb`:** open it with your software installer, or run
+  `sudo apt install ./Label-Printer-<version>-linux-amd64.deb`. It pulls in
+  what it needs, adds Label Printer to the applications menu, and installs a
+  udev rule so you can print over USB without root or joining a group.
+- **AppImage:** make it executable and run it:
+  `chmod +x Label-Printer-*.AppImage && ./Label-Printer-*.AppImage`. It needs
+  GTK 3 and D-Bus, which desktop distributions include. For USB printing,
+  install the udev rule once (it ships inside the AppImage):
+
+  ```bash
+  ./Label-Printer-*.AppImage --appimage-extract usr/share/doc/label-printer/70-label-printer.rules
+  sudo cp squashfs-root/usr/share/doc/label-printer/70-label-printer.rules /etc/udev/rules.d/
+  sudo udevadm control --reload-rules && sudo udevadm trigger
+  ```
+
+USB printing uses the kernel's `usblp` driver (`/dev/usb/lp0`). If the printer
+is not found, run `sudo modprobe usblp`. Bluetooth printing needs BlueZ, which
+desktop distributions include. Dragging files onto the window may not work in
+Wayland sessions; use **Choose a file…** instead.
+
+**macOS (untested).** Unzip and drag *Label Printer* to Applications. The app
+is not notarised by Apple, so the first time, right-click it and choose
+**Open**. Allow Bluetooth when asked. macOS has no driverless USB route, so
+connect over Bluetooth LE (or a CUPS raw queue).
 
 ### Connecting the printer
 
 - **USB:** plug it in and switch it on. The printer card appears within a few
   seconds and the header turns green.
 - **Bluetooth:** click **Scan** in the Bluetooth card, then **Connect**. Do
-  *not* add the printer in Windows Bluetooth settings: that pairs over
+  *not* pair the printer in your system's Bluetooth settings: that uses
   Bluetooth Classic and asks for a PIN (usually `0000` or `1234`). The app uses
-  Bluetooth LE, like the phone app, which needs no PIN.
+  Bluetooth LE, like the phone app, which needs no PIN. The printer is
+  remembered and reconnected automatically next time.
 
 ## Command line
 
@@ -73,12 +120,12 @@ macOS build the same code.
 # once per build machine: the pinned PDF renderer that gets embedded
 powershell -ExecutionPolicy Bypass -File scripts\fetch-pdfium.ps1   # or ./scripts/fetch-pdfium.sh
 
-cargo build --release            # target\release\thermal-ui.exe and tspl-rs.exe
+cargo build --release            # target\release\label-printer.exe and tspl-rs.exe
 cargo test --all
 ```
 
 The installer is built with Inno Setup 6:
-`iscc /DAppVersion=0.2.0 installer\thermal-rs.iss`. Releases are built by
+`iscc /DAppVersion=0.3.0 installer\label-printer.iss`. Releases are built by
 GitHub Actions when a `v*` tag is pushed. See
 [docs/development.md](docs/development.md).
 
@@ -86,14 +133,16 @@ GitHub Actions when a `v*` tag is pushed. See
 
 ```text
 crates/
-  tspl-core/     engine: TSPL encoder, frames, USB/serial/queue transports, discovery
-                 (no third-party dependencies)
-  tspl-cli/      `tspl-rs` command line tool
-  thermal-ui/    desktop app (egui): preview, PDF rendering, Bluetooth LE
-docs/            protocol reference, transports, architecture, development
-installer/       Inno Setup script
-scripts/         fetch-pdfium.ps1 / .sh (build machines only)
-vendor/pdfium/   fetched PDF renderer, embedded at build time (not committed)
+  tspl-core/       engine: TSPL encoder, frames, USB/serial/queue transports,
+                   discovery (no third-party dependencies)
+  tspl-cli/        `tspl-rs` command line tool
+  label-printer/   desktop app (egui): preview, PDF rendering, Bluetooth LE
+assets/            app icon (.ico embedded in the Windows exe, .png)
+docs/              protocol reference, transports, architecture, development
+installer/         Windows installer (Inno Setup)
+packaging/         Linux .desktop entry, udev rule, .deb scripts; macOS Info.plist
+scripts/           fetch-pdfium.ps1 / .sh (build machines only)
+vendor/pdfium/     fetched PDF renderer, embedded at build time (not committed)
 ```
 
 ## Documentation
@@ -114,13 +163,12 @@ vendor/pdfium/   fetched PDF renderer, embedded at build time (not committed)
 
 | Capability | Windows | Linux | macOS |
 | --- | --- | --- | --- |
+| **Tested with a printer** | **yes** | no | no |
+| Built and unit-tested in CI | yes | yes | yes |
 | Direct USB, no driver | `usbprint.sys` | `/dev/usb/lp*` | — |
 | Bluetooth LE | yes | yes | yes |
 | Paired Bluetooth serial | `COMx` | `/dev/rfcomm*` | `/dev/cu.*` |
 | RAW print queue (optional) | `winspool.drv` | `lp -o raw` | `lp -o raw` |
-
-Windows is tested on hardware. Linux is built and unit-tested in CI; macOS is
-expected to work but is untested.
 
 ## License
 

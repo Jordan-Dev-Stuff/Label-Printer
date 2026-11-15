@@ -9,3 +9,8 @@
 *.png binary
 *.ico binary
 *.dll binary
+
+# Linux packaging files are read by Linux tools: always LF.
+packaging/linux/** text eol=lf
+*.rules text eol=lf
+*.desktop text eol=lf

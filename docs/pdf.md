@@ -2,17 +2,17 @@
 
 PDFs are a *source* format: they are rasterised on the host and then encoded
 as TSPL like any image. `tspl-core` is untouched; it still receives a `Frame`.
-The renderer lives in the UI ([`crates/thermal-ui/src/pdf.rs`](../crates/thermal-ui/src/pdf.rs)), the
-fitting maths in [`crates/thermal-ui/src/content.rs`](../crates/thermal-ui/src/content.rs).
+The renderer lives in the UI ([`crates/label-printer/src/pdf.rs`](../crates/label-printer/src/pdf.rs)), the
+fitting maths in [`crates/label-printer/src/content.rs`](../crates/label-printer/src/content.rs).
 
 ## Nothing to install
 
-pdfium is **compiled into `thermal-ui.exe`**. On first use the app writes the
-library to `%LOCALAPPDATA%\thermal-rs\pdfium-7543\` (falling back to the
+pdfium is **compiled into `label-printer.exe`**. On first use the app writes the
+library to `%LOCALAPPDATA%\label-printer\pdfium-7543\` (falling back to the
 exe's folder, then the temp folder) and loads it from there. Users never
 download anything, and the installer ships a single executable.
 
-Developers fetch the library once per build machine; `crates/thermal-ui/build.rs` embeds it
+Developers fetch the library once per build machine; `crates/label-printer/build.rs` embeds it
 and refuses to build without it:
 
 ```powershell
@@ -42,7 +42,7 @@ client editions refuse every `.ps1` file by default.
 `pdfium-render` binds to one pdfium API revision, chosen by a Cargo feature.
 The first UI used the default (`pdfium_latest` = 7543) while the fetch script
 downloaded *latest* pdfium (8152 at the time), so the bindings and the library
-disagreed. Now `crates/thermal-ui/Cargo.toml` pins `pdfium-render = "=0.8.37"` with
+disagreed. Now `crates/label-printer/Cargo.toml` pins `pdfium-render = "=0.8.37"` with
 `pdfium_7543`, and both fetch scripts download `chromium/7543`. Change all three
 together.
 
@@ -54,7 +54,7 @@ PDF ─probe 72 dpi─► content box ─plan─► render at exact scale ─cro
 
 1. **Probe.** Render the page at 72 dpi and find the bounding box of anything
    darker than near-white (plus a 1% margin).
-2. **Plan** ([`plan_pdf`](../crates/thermal-ui/src/content.rs)). Decide whether to turn the
+2. **Plan** ([`plan_pdf`](../crates/label-printer/src/content.rs)). Decide whether to turn the
    content to match the label, then the scale that makes the *content*, not
    the page, fill the label.
 3. **Render once** at that scale, crop to the content, turn it.
@@ -76,11 +76,11 @@ support reliably.
 ## Checking a PDF without the window
 
 ```powershell
-.\target\release\thermal-ui.exe --render label.pdf --page 1 --out preview.png
+.\target\release\label-printer.exe --render label.pdf --page 1 --out preview.png
 ```
 
 It writes exactly what would print and reports the size, black coverage and
-page count. `crates/thermal-ui/tests/fixtures/letter-with-4x6-label.pdf` is the regression
+page count. `crates/label-printer/tests/fixtures/letter-with-4x6-label.pdf` is the regression
 case: a 4×6 label in the corner of a Letter page.
 
 ## Limitations

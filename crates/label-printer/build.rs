@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 fn main() {
+    embed_windows_resources();
     println!("cargo:rustc-check-cfg=cfg(pdfium_embedded)");
     if std::env::var_os("CARGO_FEATURE_PDF").is_none() {
         return;
@@ -21,7 +22,7 @@ fn main() {
     };
 
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
-    // crates/thermal-ui -> repository root.
+    // crates/label-printer -> repository root.
     let root = manifest
         .parent()
         .and_then(std::path::Path::parent)
@@ -34,7 +35,10 @@ fn main() {
     println!("cargo:rerun-if-changed={}", path.display());
 
     if path.is_file() {
-        println!("cargo:rustc-env=THERMAL_PDFIUM_LIBRARY={}", path.display());
+        println!(
+            "cargo:rustc-env=LABEL_PRINTER_PDFIUM_LIBRARY={}",
+            path.display()
+        );
         println!("cargo:rustc-cfg=pdfium_embedded");
     } else {
         let script = if os == "windows" {
@@ -47,6 +51,28 @@ fn main() {
              Fetch it once (from the repository root):\n    {script}\n\
              or build without PDF support: cargo build --no-default-features\n\n",
             path.display()
+        );
+    }
+}
+
+/// Windows: embed the app icon and version info in the .exe, so Explorer,
+/// the taskbar and shortcuts show the Label Printer icon. Never fails the
+/// build: without the Windows SDK's resource compiler the exe just keeps the
+/// default icon.
+fn embed_windows_resources() {
+    println!("cargo:rerun-if-changed=../../assets/label-printer.ico");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let mut resource = winresource::WindowsResource::new();
+    resource
+        .set_icon("../../assets/label-printer.ico")
+        .set("ProductName", "Label Printer")
+        .set("FileDescription", "Label Printer")
+        .set("CompanyName", "Label Printer");
+    if let Err(error) = resource.compile() {
+        println!(
+            "cargo:warning=couldn't embed the Windows icon ({error}); the exe keeps the default icon"
         );
     }
 }

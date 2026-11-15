@@ -1,0 +1,13 @@
+# Label Printer: let the person logged in at the computer write to the label
+# printer's USB device node (/dev/usb/lpN) without root or the `lp` group.
+#
+# `uaccess` is the systemd-logind mechanism desktops use for webcams and game
+# controllers: access is granted to the active local session and revoked when
+# it ends. The rule file must sort before 73-seat-late.rules, hence 70-.
+#
+# Installed by the .deb to /usr/lib/udev/rules.d/. For the AppImage, copy it
+# there yourself (see README), then: sudo udevadm control --reload-rules
+#
+# PEDOOLO / BEEPRT BY-482BT (USB 09c6:0426). Add a line with your printer's
+# idVendor/idProduct (from `lsusb`) to use another TSPL printer.
+SUBSYSTEM=="usbmisc", KERNEL=="lp[0-9]*", ATTRS{idVendor}=="09c6", ATTRS{idProduct}=="0426", TAG+="uaccess"

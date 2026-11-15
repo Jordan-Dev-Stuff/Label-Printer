@@ -129,7 +129,7 @@ pub fn send_raw(printer: &str, job: &[u8]) -> Result<()> {
     }
     let guard = HandleGuard(raw_handle);
 
-    let doc_name = wide("thermal-rs");
+    let doc_name = wide("Label Printer");
     let data_type = wide("RAW");
     let info = DocInfo1 {
         doc_name: doc_name.as_ptr(),

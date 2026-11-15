@@ -1,17 +1,20 @@
 # Builds a release when you push a version tag:
 #
-#   git tag v0.2.0
-#   git push origin v0.2.0
+#   git tag v0.3.0
+#   git push origin v0.3.0
 #
 # The tag must match `version` under [workspace.package] in Cargo.toml. The
 # GitHub Release gets:
-#   thermal-rs-<version>-setup.exe     installer (per-user, no admin; optional
-#                                      "Print label with thermal-rs" PDF menu)
-#   thermal-rs-<version>-portable.zip  thermal-ui.exe and tspl-rs.exe, no install
-#   SHA256SUMS.txt                     checksums of both
+#   Label-Printer-<v>-setup.exe                 Windows installer (per-user, no admin)
+#   Label-Printer-<v>-windows-x64-portable.zip  Windows, no install
+#   Label-Printer-<v>-linux-amd64.deb           Debian/Ubuntu package (untested)
+#   Label-Printer-<v>-linux-x86_64.AppImage     Linux, any distro (untested)
+#   Label-Printer-<v>-macos-universal.zip       macOS app, Apple Silicon + Intel (untested)
+#   SHA256SUMS.txt                              checksums of all of the above
 #
-# The executable embeds the PDF renderer, so neither download needs anything
-# else at install or run time.
+# Every executable embeds the PDF renderer, so nothing else is downloaded at
+# install or run time. Platform jobs run in parallel; the release is published
+# only when all of them succeed.
 name: Release
 
 on:
@@ -31,8 +34,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  version:
+    name: Check the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${GITHUB_REF_NAME#v}"
+            cargo_version="$(grep -m1 -E '^version = "' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')"
+            if [ "$v" != "$cargo_version" ]; then
+              echo "::error::Tag v$v doesn't match version $cargo_version in Cargo.toml. Bump Cargo.toml (or re-tag) first."
+              exit 1
+            fi
+          else
+            v="${{ inputs.version }}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
   windows:
-    name: Build Windows release
+    name: Windows
+    needs: version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,23 +69,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Work out the version
-        id: version
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "push") {
-            $v = "${{ github.ref_name }}".TrimStart("v")
-            $cargo = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-            if ($v -ne $cargo) {
-              Write-Error "Tag v$v doesn't match version $cargo in Cargo.toml. Bump Cargo.toml (or re-tag) first."
-              exit 1
-            }
-          } else {
-            $v = "${{ inputs.version }}"
-          }
-          "version=$v" >> $env:GITHUB_OUTPUT
-
-      # Embedded into thermal-ui.exe by crates/thermal-ui/build.rs.
+      # Embedded into label-printer.exe by crates/label-printer/build.rs.
       - name: Fetch pdfium
         shell: pwsh
         run: ./scripts/fetch-pdfium.ps1
@@ -78,37 +87,208 @@ jobs:
             choco install innosetup --no-progress -y
           }
 
-      - name: Build installer
+      - name: Installer and portable zip
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=${{ steps.version.outputs.version }}" installer\thermal-rs.iss
+          $v = "${{ needs.version.outputs.version }}"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" installer\label-printer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Portable zip and checksums
-        shell: pwsh
-        run: |
-          $v = "${{ steps.version.outputs.version }}"
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "target\installer\thermal-rs-$v-setup.exe" dist\
-          Copy-Item vendor\pdfium\windows-x86_64\LICENSE dist\LICENSE-pdfium.txt
-          Compress-Archive -Path target\release\thermal-ui.exe, target\release\tspl-rs.exe, README.md, LICENSE, dist\LICENSE-pdfium.txt `
-            -DestinationPath "dist\thermal-rs-$v-portable.zip"
-          Remove-Item dist\LICENSE-pdfium.txt
-          Get-ChildItem dist | ForEach-Object {
-            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Set-Content dist\SHA256SUMS.txt
+          New-Item -ItemType Directory -Force dist, portable | Out-Null
+          Copy-Item "target\installer\Label-Printer-$v-setup.exe" dist\
+          Copy-Item target\release\label-printer.exe, target\release\tspl-rs.exe, README.md, LICENSE portable\
+          Copy-Item vendor\pdfium\windows-x86_64\LICENSE portable\LICENSE-pdfium.txt
+          Compress-Archive -Path portable\* -DestinationPath "dist\Label-Printer-$v-windows-x64-portable.zip"
           Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  linux:
+    name: Linux
+    needs: version
+    # The oldest supported Ubuntu keeps the glibc requirement low (2.35), so
+    # the binaries run on most current distributions.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+
+      - name: Linux libraries (window, file dialog, Bluetooth)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libdbus-1-dev libgtk-3-dev libxkbcommon-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb@3.8.0
+
+      - name: Fetch pdfium
+        run: bash scripts/fetch-pdfium.sh linux-x86_64
+
+      - name: Tests
+        run: cargo test --all
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # Debian, Ubuntu, Mint, Pop!_OS: dependencies declared, menu entry,
+      # icon, and the udev rule that grants USB access without the lp group.
+      - name: .deb
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          mkdir -p dist
+          cargo deb -p label-printer --no-build --output "dist/Label-Printer-$v-linux-amd64.deb"
+          dpkg-deb --info "dist/Label-Printer-$v-linux-amd64.deb"
+          dpkg-deb --contents "dist/Label-Printer-$v-linux-amd64.deb"
+
+      # Any distribution: one executable file. The runtime is static, so no
+      # FUSE 2 library is needed on the user's machine.
+      - name: AppImage
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          app=AppDir
+          mkdir -p "$app/usr/bin" "$app/usr/share/applications" \
+            "$app/usr/share/icons/hicolor/256x256/apps" "$app/usr/share/doc/label-printer"
+          install -m 755 target/release/label-printer target/release/tspl-rs "$app/usr/bin/"
+          install -m 644 packaging/linux/label-printer.desktop "$app/usr/share/applications/"
+          install -m 644 assets/label-printer.png "$app/usr/share/icons/hicolor/256x256/apps/"
+          install -m 644 README.md LICENSE packaging/linux/70-label-printer.rules "$app/usr/share/doc/label-printer/"
+          install -m 644 vendor/pdfium/linux-x86_64/LICENSE "$app/usr/share/doc/label-printer/LICENSE-pdfium"
+          # AppImage root: entry point, desktop file and icon.
+          ln -s usr/bin/label-printer "$app/AppRun"
+          cp packaging/linux/label-printer.desktop assets/label-printer.png "$app/"
+
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool "$app" "dist/Label-Printer-$v-linux-x86_64.AppImage"
+          ls -l dist
+
+      # The first time the packaged app itself runs on Linux: render the
+      # regression PDF headlessly through the embedded pdfium, once from the
+      # .deb's files and once through the AppImage.
+      - name: Smoke test the packages
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          fixture=crates/label-printer/tests/fixtures/letter-with-4x6-label.pdf
+          dpkg-deb -x "dist/Label-Printer-$v-linux-amd64.deb" deb-root
+          deb-root/usr/bin/label-printer --render "$fixture" --out deb-render.png
+          deb-root/usr/bin/tspl-rs print --target file:deb-card.tspl --pattern testcard
+          APPIMAGE_EXTRACT_AND_RUN=1 "dist/Label-Printer-$v-linux-x86_64.AppImage" --render "$fixture" --out appimage-render.png
+          test -s deb-render.png && test -s appimage-render.png && test "$(stat -c %s deb-card.tspl)" -eq 124371
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  macos:
+    name: macOS
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      # One pdfium per architecture: each slice of the universal app embeds
+      # its own.
+      - name: Fetch pdfium
+        run: |
+          bash scripts/fetch-pdfium.sh macos-aarch64
+          bash scripts/fetch-pdfium.sh macos-x86_64
+
+      - name: Tests
+        run: cargo test --all
+
+      - name: Build (Apple Silicon and Intel)
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+
+      - name: Assemble Label Printer.app
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          app="pkg/Label Printer.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist
+
+          for bin in label-printer tspl-rs; do
+            lipo -create \
+              "target/aarch64-apple-darwin/release/$bin" \
+              "target/x86_64-apple-darwin/release/$bin" \
+              -output "pkg/$bin"
+          done
+          mv pkg/label-printer "$app/Contents/MacOS/label-printer"
+          sed "s/@VERSION@/$v/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
+
+          # Icon: the app draws it at every size; iconutil packs the .icns.
+          "$app/Contents/MacOS/label-printer" --export-icons pkg/icons
+          iconset=pkg/label-printer.iconset
+          mkdir -p "$iconset"
+          for s in 16 32 128 256 512; do
+            cp "pkg/icons/label-printer-$s.png" "$iconset/icon_${s}x${s}.png"
+            cp "pkg/icons/label-printer-$((s * 2)).png" "$iconset/icon_${s}x${s}@2x.png"
+          done
+          iconutil -c icns "$iconset" -o "$app/Contents/Resources/label-printer.icns"
+
+          # Ad-hoc signature (no Apple Developer ID): required for the
+          # universal binary to launch on Apple Silicon. Not notarised, so
+          # Gatekeeper asks the first time (right-click > Open).
+          codesign --force --deep --sign - "$app"
+
+          name="Label-Printer-$v-macos-universal"
+          mkdir -p "pkg/$name"
+          mv "$app" "pkg/$name/"
+          cp pkg/tspl-rs README.md LICENSE "pkg/$name/"
+          cp vendor/pdfium/macos-aarch64/LICENSE "pkg/$name/LICENSE-pdfium.txt"
+          (cd pkg && ditto -c -k --keepParent "$name" "../dist/$name.zip")
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  publish:
+    name: Publish
+    needs: [version, windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Keep the files with this run
         uses: actions/upload-artifact@v4
         with:
-          name: thermal-rs-${{ steps.version.outputs.version }}
+          name: Label-Printer-${{ needs.version.outputs.version }}
           path: dist/*
 
       - name: Publish the GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          name: thermal-rs ${{ steps.version.outputs.version }}
+          name: Label Printer ${{ needs.version.outputs.version }}
           files: dist/*
           generate_release_notes: true

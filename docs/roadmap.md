@@ -53,9 +53,12 @@ the printer never paired in Windows.
 
 ## Step 6 — release
 
-- [x] Inno Setup script (`installer/thermal-rs.iss`), single-file install
-- [x] CI (fmt, clippy, tests on Windows and Linux) and a tag-triggered release
-  workflow: installer, portable zip, checksums
+- [x] Renamed to Label Printer; icon embedded in the Windows exe and shortcuts
+- [x] Windows installer and portable zip; Linux .deb (with USB udev rule) and
+  AppImage; universal
+  macOS app (Linux and macOS untested on hardware)
+- [x] CI (fmt, clippy, tests on Windows, Linux and macOS) and a tag-triggered
+  release workflow publishing all platforms with checksums
 - [ ] Code signing
 
 ## Open questions

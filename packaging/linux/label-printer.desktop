@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Label Printer
+GenericName=Label printing
+Comment=Print PDFs and images on a TSPL label printer, no driver needed
+Exec=label-printer %f
+Icon=label-printer
+Terminal=false
+Categories=Office;Utility;
+MimeType=application/pdf;image/png;image/jpeg;image/bmp;image/gif;image/tiff;image/webp;
+Keywords=label;printer;thermal;shipping;TSPL;

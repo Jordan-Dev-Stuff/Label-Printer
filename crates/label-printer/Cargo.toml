@@ -1,0 +1,89 @@
+[package]
+name = "label-printer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Label Printer: driverless PDF and image printing for TSPL label printers"
+
+
+[features]
+# PDF support is on by default. Build with `--no-default-features` to compile
+# without the pdfium binding; the app then reports PDFs as unsupported.
+default = ["pdf"]
+pdf = ["dep:pdfium-render"]
+
+[dependencies]
+tspl-core = { path = "../tspl-core" }
+
+# egui desktop stack with Phosphor icons.
+eframe = { version = "0.36", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "persistence",
+    "wayland",
+    "x11",
+] }
+egui-phosphor = { version = "0.14", default-features = false, features = ["regular", "fill"] }
+serde = { version = "1", features = ["derive"] }
+
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "bmp",
+    "gif",
+    "tiff",
+    "webp",
+] }
+rfd = "0.15"
+btleplug = "0.11"
+tokio = { version = "1", features = ["rt", "time"] }
+
+# PDF rasterisation. The crate loads pdfium as a dynamic library at runtime.
+# Its bindings are compiled for one pdfium API revision, so the feature below
+# and PDFIUM_RELEASE in src/pdf.rs (and the fetch scripts) must name the same
+# build: a newer pdfium.dll can be missing or have changed functions.
+pdfium-render = { version = "=0.8.37", optional = true, default-features = false, features = [
+    "pdfium_7543",
+    "thread_safe",
+] }
+
+[dev-dependencies]
+ron = "0.12"
+
+[build-dependencies]
+# Embeds the icon and version info into the Windows .exe (no-op elsewhere).
+winresource = { version = "0.1", default-features = false }
+
+# `cargo deb -p label-printer --no-build` after `cargo build --release`
+# (the release workflow does this). Paths starting with target/release/ come
+# from the workspace build; the rest are relative to this crate.
+[package.metadata.deb]
+name = "label-printer"
+maintainer = "Label Printer contributors"
+copyright = "2026, Label Printer contributors"
+license-file = ["../../LICENSE", "0"]
+section = "utils"
+priority = "optional"
+# $auto: worked out from the binaries' shared libraries (GTK 3, D-Bus, …).
+depends = "$auto"
+# BlueZ is only needed for Bluetooth printing; USB works without it.
+recommends = "bluez"
+extended-description = """\
+Print PDFs and images on a PEDOOLO / BEEPRT BY-482BT TSPL label printer with \
+no printer driver, over USB or Bluetooth LE. Shipping labels on a full page \
+are found, cropped and rendered at the printer's 203 dpi. Includes a udev \
+rule that lets the logged-in user print over USB without root or the lp \
+group. Linux support is untested on hardware."""
+maintainer-scripts = "../../packaging/linux/debian/"
+assets = [
+    ["target/release/label-printer", "usr/bin/", "755"],
+    ["target/release/tspl-rs", "usr/bin/", "755"],
+    ["../../packaging/linux/label-printer.desktop", "usr/share/applications/", "644"],
+    ["../../assets/label-printer.png", "usr/share/icons/hicolor/256x256/apps/label-printer.png", "644"],
+    ["../../packaging/linux/70-label-printer.rules", "usr/lib/udev/rules.d/", "644"],
+    ["../../README.md", "usr/share/doc/label-printer/", "644"],
+    ["../../vendor/pdfium/linux-x86_64/LICENSE", "usr/share/doc/label-printer/LICENSE-pdfium", "644"],
+]

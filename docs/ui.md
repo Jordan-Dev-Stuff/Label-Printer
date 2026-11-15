@@ -1,11 +1,11 @@
 # Desktop app
 
-`thermal-ui` is an `eframe`/`egui` app: dark `#16171B` background, rounded
+`label-printer` is an `eframe`/`egui` app: dark `#16171B` background, rounded
 cards, Phosphor icons, accent-filled primary buttons and slide toggles, with a
 thermal-orange accent. It is a thin shell over `tspl-core`; every print uses
 the same encoder and transports as the CLI.
 
-![thermal-rs window](screenshots/main-window.png)
+![Label Printer window](screenshots/main-window.png)
 
 ## Layout
 
@@ -18,7 +18,7 @@ the same encoder and transports as the CLI.
 
 Keyboard: **Ctrl+O** opens a file, **Ctrl+P** prints. Files can be dropped
 anywhere on the window, or passed on the command line (the installer can add
-*Print label with thermal-rs* to the PDF right-click menu).
+*Print with Label Printer* to the PDF right-click menu).
 
 ## Finding and connecting to the printer
 
@@ -89,9 +89,9 @@ when they post an event. Queued previews collapse to the newest.
 Label size, quality, content options, the last printer, the remembered
 Bluetooth printer and the last folder are saved through eframe persistence and
 restored, range-checked, on start. The settings file is
-`%APPDATA%\thermal-rs\data\app.ron`. If that folder cannot be written (eframe
+`%APPDATA%\label-printer\data\app.ron`. If that folder cannot be written (eframe
 would otherwise disable saving without a word), the app uses
-`thermal-rs-data\` beside the executable, then the temp folder, and says so in
+`label-printer-data\` beside the executable, then the temp folder, and says so in
 the Activity log. Settings already present in one of those places are kept
 there. The remembered printer is written the moment it connects.
 
@@ -99,9 +99,9 @@ there. The remembered printer is written the moment it connects.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\fetch-pdfium.ps1   # once
-cargo run --release -p thermal-ui
+cargo run --release -p label-printer
 ```
 
-`THERMAL_UI_SCREENSHOT=docs\screenshots\main-window.png` makes the app save its
+`LABEL_PRINTER_SCREENSHOT=docs\screenshots\main-window.png` makes the app save its
 window once discovery and the preview have settled, then exit; that is how the
 screenshots are produced. Pass a PDF path as the first argument to open it.

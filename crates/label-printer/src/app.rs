@@ -94,7 +94,7 @@ pub struct ThermalApp {
     status: Option<Result<String, String>>,
     log: Vec<String>,
     show_log: bool,
-    /// `THERMAL_UI_SCREENSHOT`: save the window here once ready, then quit
+    /// `LABEL_PRINTER_SCREENSHOT`: save the window here once ready, then quit
     /// (used to produce docs/app-preview.png).
     screenshot: Option<(PathBuf, u32)>,
     /// Write settings at the next frame (a printer was remembered or forgotten).
@@ -111,7 +111,10 @@ impl ThermalApp {
         theme::setup(&cc.egui_ctx);
         let settings = cc
             .storage
-            .and_then(|storage| eframe::get_value::<Settings>(storage, settings::STORAGE_KEY))
+            .and_then(|storage| {
+                eframe::get_value::<Settings>(storage, settings::STORAGE_KEY)
+                    .or_else(|| eframe::get_value(storage, settings::LEGACY_STORAGE_KEY))
+            })
             .unwrap_or_default()
             .sanitized();
 
@@ -140,7 +143,7 @@ impl ThermalApp {
             log: Vec::new(),
             show_log: false,
             save_now: false,
-            screenshot: std::env::var_os("THERMAL_UI_SCREENSHOT")
+            screenshot: std::env::var_os("LABEL_PRINTER_SCREENSHOT")
                 .map(|path| (PathBuf::from(path), 0)),
             logo: None,
         };
@@ -746,13 +749,13 @@ impl ThermalApp {
         ui.horizontal(|ui| {
             let logo = self.logo.get_or_insert_with(|| {
                 let image =
-                    egui::ColorImage::from_rgba_unmultiplied([64, 64], &theme::icon_rgba(64));
+                    egui::ColorImage::from_rgba_unmultiplied([64, 64], &crate::icon::icon_rgba(64));
                 ui.ctx()
                     .load_texture("logo", image, egui::TextureOptions::LINEAR)
             });
             ui.add(egui::Image::new((logo.id(), Vec2::splat(34.0))));
             ui.vertical(|ui| {
-                ui.label(RichText::new("thermal-rs").size(21.0).color(TEXT));
+                ui.label(RichText::new("Label Printer").size(21.0).color(TEXT));
                 ui.label(
                     RichText::new("Label printing, no driver")
                         .size(13.0)
@@ -1611,7 +1614,7 @@ impl ThermalApp {
 }
 
 impl ThermalApp {
-    /// Debug hook behind `THERMAL_UI_SCREENSHOT`: once discovery and the
+    /// Debug hook behind `LABEL_PRINTER_SCREENSHOT`: once discovery and the
     /// preview have settled, capture the window to a PNG and close.
     fn debug_screenshot(&mut self, ctx: &egui::Context) {
         let Some((path, frames)) = self.screenshot.as_mut() else {

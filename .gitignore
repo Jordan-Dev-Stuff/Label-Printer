@@ -6,6 +6,7 @@ target/
 vendor/pdfium/*/
 
 # Settings saved beside a portable copy of the app
+label-printer-data/
 thermal-rs-data/
 
 # Jobs and captures written by local runs

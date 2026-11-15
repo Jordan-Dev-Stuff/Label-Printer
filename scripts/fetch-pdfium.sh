@@ -1,26 +1,44 @@
 #!/usr/bin/env bash
-# Downloads the pinned pdfium build for this platform into vendor/pdfium/,
-# where crates/thermal-ui/build.rs embeds it into the executable. Run once per
+# Downloads the pinned pdfium build into vendor/pdfium/<platform>/, where
+# crates/label-printer/build.rs embeds it into the executable. Run once per
 # build machine; end users never need it.
 #
-#   ./scripts/fetch-pdfium.sh
+#   ./scripts/fetch-pdfium.sh               # this machine's platform
+#   ./scripts/fetch-pdfium.sh macos-x86_64  # another one, for cross builds
+#
+# Platforms: linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64. The name
+# is `<target_os>-<target_arch>`, the folder build.rs looks in.
 #
 # Source: https://github.com/bblanchon/pdfium-binaries (BSD-3).
 # The release must match the `pdfium_XXXX` feature of pdfium-render in
-# crates/thermal-ui/Cargo.toml; a different build can be missing functions
+# crates/label-printer/Cargo.toml; a different build can be missing functions
 # the bindings need.
 set -euo pipefail
 
 release="chromium/7543"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) asset="pdfium-mac-arm64.tgz"; dir="macos-aarch64"; libname="libpdfium.dylib" ;;
-    Darwin-*) asset="pdfium-mac-x64.tgz"; dir="macos-x86_64"; libname="libpdfium.dylib" ;;
-    Linux-aarch64) asset="pdfium-linux-arm64.tgz"; dir="linux-aarch64"; libname="libpdfium.so" ;;
-    Linux-*) asset="pdfium-linux-x64.tgz"; dir="linux-x86_64"; libname="libpdfium.so" ;;
+platform="${1:-}"
+if [ -z "${platform}" ]; then
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64) platform="macos-aarch64" ;;
+        Darwin-*) platform="macos-x86_64" ;;
+        Linux-aarch64) platform="linux-aarch64" ;;
+        Linux-*) platform="linux-x86_64" ;;
+        *)
+            echo "unsupported platform: $(uname -s) $(uname -m)" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+case "${platform}" in
+    macos-aarch64) asset="pdfium-mac-arm64.tgz"; libname="libpdfium.dylib" ;;
+    macos-x86_64) asset="pdfium-mac-x64.tgz"; libname="libpdfium.dylib" ;;
+    linux-aarch64) asset="pdfium-linux-arm64.tgz"; libname="libpdfium.so" ;;
+    linux-x86_64) asset="pdfium-linux-x64.tgz"; libname="libpdfium.so" ;;
     *)
-        echo "unsupported platform: $(uname -s) $(uname -m)" >&2
+        echo "unknown platform ${platform}; use linux-x86_64, linux-aarch64, macos-x86_64 or macos-aarch64" >&2
         exit 1
         ;;
 esac
@@ -43,9 +61,8 @@ if [ -z "${library}" ]; then
     exit 1
 fi
 
-dest="${root}/vendor/pdfium/${dir}"
+dest="${root}/vendor/pdfium/${platform}"
 mkdir -p "${dest}"
 cp "${library}" "${dest}/${libname}"
 cp "${work}/LICENSE" "${dest}/LICENSE"
 echo "pdfium ${release} -> ${dest}/${libname}"
-echo "Build with: cargo build --release"

@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/tspl-core", "crates/tspl-cli", "crates/thermal-ui"]
-default-members = ["crates/tspl-core", "crates/tspl-cli", "crates/thermal-ui"]
+members = ["crates/tspl-core", "crates/tspl-cli", "crates/label-printer"]
+default-members = ["crates/tspl-core", "crates/tspl-cli", "crates/label-printer"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT"

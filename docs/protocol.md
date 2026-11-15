@@ -257,7 +257,7 @@ stopping as soon as the remembered printer appears) and then connects.
 
 The printer exposes the job as a writable GATT characteristic; there is no
 LE-specific framing. The same TSPL bytes as USB are written in chunks.
-Characteristics tried, in order ([`choose_channel`](../crates/thermal-ui/src/ble.rs)):
+Characteristics tried, in order ([`choose_channel`](../crates/label-printer/src/ble.rs)):
 
 | UUID | Commonly found on |
 | --- | --- |

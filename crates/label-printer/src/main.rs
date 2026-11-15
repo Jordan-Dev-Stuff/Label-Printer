@@ -1,8 +1,9 @@
-//! thermal-rs desktop app: wiring only.
+//! Label Printer desktop app: wiring only.
 //!
-//! `thermal-ui [FILE]` opens the window, optionally with a file loaded.
-//! `thermal-ui --render FILE [--page N] [--out PNG] [--width MM --height MM]`
+//! `label-printer [FILE]` opens the window, optionally with a file loaded.
+//! `label-printer --render FILE [--page N] [--out PNG] [--width MM --height MM]`
 //! renders exactly what would print, without a window, for checking PDFs.
+//! `label-printer --export-icons DIR` writes the app icon as `.ico` and PNGs.
 
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
@@ -11,6 +12,7 @@ mod ble;
 mod content;
 mod devices;
 mod filter;
+mod icon;
 mod jobs;
 mod pdf;
 mod settings;
@@ -23,15 +25,18 @@ use eframe::egui;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let result = if args.first().map(String::as_str) == Some("--render") {
-        render_cli(&args[1..])
-    } else {
-        run_window(args.into_iter().next().map(PathBuf::from))
+    let result = match args.first().map(String::as_str) {
+        Some("--render") => render_cli(&args[1..]),
+        Some("--export-icons") => args
+            .get(1)
+            .ok_or_else(|| "--export-icons needs a folder".to_string())
+            .and_then(|dir| icon::export(std::path::Path::new(dir))),
+        _ => run_window(args.into_iter().next().map(PathBuf::from)),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("thermal-ui: {message}");
+            eprintln!("label-printer: {message}");
             ExitCode::FAILURE
         }
     }
@@ -41,11 +46,11 @@ fn run_window(initial_file: Option<PathBuf>) -> Result<(), String> {
     let storage = settings::storage_location();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("thermal-rs")
+            .with_title("Label Printer")
             .with_inner_size([1120.0, 780.0])
             .with_min_inner_size([860.0, 560.0])
             .with_icon(egui::IconData {
-                rgba: theme::icon_rgba(64),
+                rgba: icon::icon_rgba(64),
                 width: 64,
                 height: 64,
             }),
@@ -55,7 +60,7 @@ fn run_window(initial_file: Option<PathBuf>) -> Result<(), String> {
         ..Default::default()
     };
     eframe::run_native(
-        "thermal-rs",
+        "label-printer",
         options,
         Box::new(move |cc| Ok(Box::new(app::ThermalApp::new(cc, initial_file, storage)))),
     )

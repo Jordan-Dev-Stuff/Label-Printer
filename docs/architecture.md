@@ -6,7 +6,7 @@
 graph TD
     CLI[tspl-cli
         tspl-rs command line] --> Core
-    UI[thermal-ui
+    UI[label-printer
         desktop app] --> Core
     UI --> PDF[pdfium
         embedded at build time]
@@ -40,7 +40,7 @@ characteristic.
 | --- | --- |
 | `tspl-core` | Engine: frames, encoder, targets, discovery, platform device access |
 | `tspl-cli` | `tspl-rs`: `list`, `print`, `send` |
-| `thermal-ui` | Desktop app: UI, workers, PDF rendering, image preparation, Bluetooth LE, settings |
+| `label-printer` | Desktop app: UI, workers, PDF rendering, image preparation, Bluetooth LE, settings |
 
 ### `tspl-core` modules
 
@@ -54,7 +54,7 @@ characteristic.
 | `os` | Device access: SetupAPI, registry and `usbprint` I/O on Windows; `/dev` and sysfs on Unix |
 | `error` | One `Error` enum, `Display` + `std::error::Error` |
 
-### `thermal-ui` modules
+### `label-printer` modules
 
 | Module | Responsibility |
 | --- | --- |

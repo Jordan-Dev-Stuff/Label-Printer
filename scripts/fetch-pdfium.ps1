@@ -1,12 +1,12 @@
 # Downloads the pinned pdfium build into vendor\pdfium\, where
-# crates\thermal-ui\build.rs embeds it into the executable. Run once per build
+# crates\label-printer\build.rs embeds it into the executable. Run once per build
 # machine; end users never need it.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\fetch-pdfium.ps1
 #
 # Source: https://github.com/bblanchon/pdfium-binaries (BSD-3).
 # The release must match the `pdfium_XXXX` feature of pdfium-render in
-# crates\thermal-ui\Cargo.toml; a different build can be missing functions the
+# crates\label-printer\Cargo.toml; a different build can be missing functions the
 # bindings need.
 [CmdletBinding()]
 param()

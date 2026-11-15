@@ -30,7 +30,7 @@ mod engine {
     use super::PDFIUM_RELEASE;
 
     /// The library bytes, compiled in by `build.rs`.
-    static LIBRARY: &[u8] = include_bytes!(env!("THERMAL_PDFIUM_LIBRARY"));
+    static LIBRARY: &[u8] = include_bytes!(env!("LABEL_PRINTER_PDFIUM_LIBRARY"));
 
     /// A loaded pdfium. Not `Send`: it lives on the render worker thread.
     pub struct PdfEngine {
@@ -142,7 +142,7 @@ mod engine {
             std::env::current_exe()
                 .ok()
                 .and_then(|exe| exe.parent().map(|dir| dir.join(&folder))),
-            Some(std::env::temp_dir().join("thermal-rs").join(&folder)),
+            Some(std::env::temp_dir().join("label-printer").join(&folder)),
         ];
         let mut errors = Vec::new();
         for dir in candidates.into_iter().flatten() {

@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::content::PrepareOptions;
 
 /// Key under which eframe stores [`Settings`].
-pub const STORAGE_KEY: &str = "thermal-rs.settings";
+pub const STORAGE_KEY: &str = "label-printer.settings";
+
+/// Key used before the rename; read when the new one is missing.
+pub const LEGACY_STORAGE_KEY: &str = "thermal-rs.settings";
 
 /// A remembered Bluetooth LE printer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,10 +165,20 @@ impl Settings {
     }
 }
 
-/// Per-user data directory (`%LOCALAPPDATA%\thermal-rs` on Windows).
+/// Folder name used under the per-user directories and beside the executable.
+pub const APP_DIR: &str = "label-printer";
+
+/// Folder name used before the app was renamed; settings are copied from it.
+pub const LEGACY_APP_DIR: &str = "thermal-rs";
+
+/// Per-user data directory (`%LOCALAPPDATA%\label-printer` on Windows).
 #[must_use]
 pub fn data_dir() -> Option<PathBuf> {
-    let base = if cfg!(windows) {
+    user_data_base().map(|base| base.join(APP_DIR))
+}
+
+fn user_data_base() -> Option<PathBuf> {
+    if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {
         std::env::var_os("HOME").map(|home| {
@@ -180,8 +193,7 @@ pub fn data_dir() -> Option<PathBuf> {
                 std::env::var_os("HOME")
                     .map(|home| PathBuf::from(home).join(".local").join("share"))
             })
-    }?;
-    Some(base.join("thermal-rs"))
+    }
 }
 
 /// Millimetres to printer dots, at least one.
@@ -207,28 +219,49 @@ pub struct StorageLocation {
 
 /// Picks a settings file that can actually be written.
 ///
-/// eframe's own default (`%APPDATA%\thermal-rs\data\app.ron`) disables saving
-/// without a word when that folder cannot be created, which made the app
-/// forget the Bluetooth printer on every start. The candidates are probed by
-/// writing to them: the per-user folder, a `thermal-rs-data` folder beside
-/// the executable (portable use), then the temp folder.
+/// eframe's own default disables saving without a word when its folder cannot
+/// be created, which made the app forget the Bluetooth printer on every start.
+/// The candidates are probed by writing to them: the per-user folder, a
+/// `label-printer-data` folder beside the executable (portable use), then the
+/// temp folder. Settings saved under the app's old name are copied over once.
 #[must_use]
 pub fn storage_location() -> Option<StorageLocation> {
-    let preferred = config_dir().map(|dir| dir.join("data"));
-    let beside_exe = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join("thermal-rs-data")));
-    let temp = Some(std::env::temp_dir().join("thermal-rs-data"));
-
-    let candidates: Vec<PathBuf> = [preferred.clone(), beside_exe, temp]
-        .into_iter()
-        .flatten()
-        .collect();
+    let preferred = config_dir_named(APP_DIR).map(|dir| dir.join("data"));
+    let candidates = storage_candidates(APP_DIR);
     let dir = choose_dir(&candidates)?;
+    migrate_legacy(&dir, &storage_candidates(LEGACY_APP_DIR));
     Some(StorageLocation {
         preferred: preferred.as_ref() == Some(&dir),
         file: dir.join("app.ron"),
     })
+}
+
+/// Settings folders for an app folder name, in order of preference.
+fn storage_candidates(name: &str) -> Vec<PathBuf> {
+    let preferred = config_dir_named(name).map(|dir| dir.join("data"));
+    let beside_exe = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(format!("{name}-data"))));
+    let temp = Some(std::env::temp_dir().join(format!("{name}-data")));
+    [preferred, beside_exe, temp]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// Copies `app.ron` from the first legacy folder that has one into `target`,
+/// unless `target` already has settings. Returns the file copied from.
+pub fn migrate_legacy(target: &std::path::Path, legacy: &[PathBuf]) -> Option<PathBuf> {
+    let destination = target.join("app.ron");
+    if destination.is_file() {
+        return None;
+    }
+    let source = legacy
+        .iter()
+        .map(|dir| dir.join("app.ron"))
+        .find(|file| file.is_file())?;
+    std::fs::copy(&source, &destination).ok()?;
+    Some(source)
 }
 
 /// A writable candidate that already holds settings, so they are never split
@@ -258,14 +291,13 @@ fn is_writable(dir: &std::path::Path) -> bool {
     ok
 }
 
-/// Per-user settings directory (`%APPDATA%\thermal-rs` on Windows), the same
-/// place eframe would choose.
-#[must_use]
-pub fn config_dir() -> Option<PathBuf> {
+/// Per-user settings directory for an app folder name
+/// (`%APPDATA%\label-printer` on Windows).
+fn config_dir_named(name: &str) -> Option<PathBuf> {
     if cfg!(windows) {
-        std::env::var_os("APPDATA").map(|base| PathBuf::from(base).join("thermal-rs"))
+        std::env::var_os("APPDATA").map(|base| PathBuf::from(base).join(name))
     } else {
-        data_dir()
+        user_data_base().map(|base| base.join(name))
     }
 }
 
@@ -378,6 +410,41 @@ mod tests {
             choose_dir(&[usual.clone(), fallback.clone()]),
             Some(fallback)
         );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn legacy_settings_are_copied_once() {
+        let base = std::env::current_dir()
+            .expect("cwd")
+            .join("target")
+            .join(format!("settings-migrate-{}", std::process::id()));
+        let new = base.join("new");
+        let old_missing = base.join("old-missing");
+        let old = base.join("old");
+        std::fs::create_dir_all(&new).expect("new");
+        std::fs::create_dir_all(&old).expect("old");
+        std::fs::write(old.join("app.ron"), "old settings").expect("old file");
+
+        // Nothing in the new place: copied from the first legacy folder that has a file.
+        let copied = migrate_legacy(&new, &[old_missing.clone(), old.clone()]);
+        assert_eq!(copied, Some(old.join("app.ron")));
+        assert_eq!(
+            std::fs::read_to_string(new.join("app.ron")).expect("copied"),
+            "old settings"
+        );
+
+        // Already migrated (or newer settings saved): never overwritten.
+        std::fs::write(new.join("app.ron"), "new settings").expect("new file");
+        assert_eq!(migrate_legacy(&new, std::slice::from_ref(&old)), None);
+        assert_eq!(
+            std::fs::read_to_string(new.join("app.ron")).expect("kept"),
+            "new settings"
+        );
+
+        // No legacy settings anywhere.
+        assert_eq!(migrate_legacy(&base.join("empty"), &[old_missing]), None);
 
         let _ = std::fs::remove_dir_all(&base);
     }

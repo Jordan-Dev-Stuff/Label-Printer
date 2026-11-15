@@ -454,12 +454,12 @@ mod tests {
         assert!(error.contains("definitely-missing-label.png"), "{error}");
 
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("thermal-ui-corrupt-{}.png", std::process::id()));
+        let path = dir.join(format!("label-printer-corrupt-{}.png", std::process::id()));
         if std::fs::write(&path, b"not a png").is_ok() {
             let error = worker
                 .frame(&Source::File(path.clone()), 0, layout())
                 .expect_err("corrupt");
-            assert!(error.contains("thermal-ui-corrupt"), "{error}");
+            assert!(error.contains("label-printer-corrupt"), "{error}");
             let _ = std::fs::remove_file(&path);
         }
     }

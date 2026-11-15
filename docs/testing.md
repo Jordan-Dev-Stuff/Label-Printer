@@ -42,7 +42,7 @@ Bluetooth stack, earbuds on a Bluetooth serial port (hidden), incoming-only
 Bluetooth ports (dropped), IEEE 1284 id parsing and reply decoding, and that a
 non-label office printer is never chosen automatically.
 
-### App: `crates/thermal-ui`
+### App: `crates/label-printer`
 
 | Module | Proves |
 | --- | --- |
@@ -58,7 +58,7 @@ With the embedded pdfium, render the regression fixture (a 4×6 label in the
 corner of a Letter page) exactly as it would print:
 
 ```powershell
-.\target\release\thermal-ui.exe --render crates\thermal-ui\tests\fixtures\letter-with-4x6-label.pdf --out preview.png
+.\target\release\label-printer.exe --render crates\label-printer\tests\fixtures\letter-with-4x6-label.pdf --out preview.png
 ```
 
 Expect `812x1218 dots … pages: 1` and a crisp, cropped label in the PNG, like

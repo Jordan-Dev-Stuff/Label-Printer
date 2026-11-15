@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Bundle description for "Label Printer.app". The release workflow replaces
+     @VERSION@. NSBluetoothAlwaysUsageDescription is required: without it macOS
+     terminates the app the first time it uses Bluetooth. -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Label Printer</string>
+    <key>CFBundleDisplayName</key>
+    <string>Label Printer</string>
+    <key>CFBundleIdentifier</key>
+    <string>io.github.jordan-dev-stuff.label-printer</string>
+    <key>CFBundleExecutable</key>
+    <string>label-printer</string>
+    <key>CFBundleIconFile</key>
+    <string>label-printer</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@VERSION@</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Label Printer connects to Bluetooth label printers to print labels.</string>
+</dict>
+</plist>

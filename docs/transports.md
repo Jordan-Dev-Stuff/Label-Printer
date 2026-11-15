@@ -58,7 +58,7 @@ Bluetooth card, with no pairing and no PIN. Do not pair the printer in
 Windows settings for this. If it is already paired and LE fails, remove it from
 Windows Bluetooth settings and scan again.
 
-Implementation: [`crates/thermal-ui/src/ble.rs`](../crates/thermal-ui/src/ble.rs).
+Implementation: [`crates/label-printer/src/ble.rs`](../crates/label-printer/src/ble.rs).
 
 1. Scan for advertisers; printers sort first.
 2. Connect and pick the print characteristic: `0xFF02`, the ISSC transparent

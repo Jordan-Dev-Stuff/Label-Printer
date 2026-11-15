@@ -25,7 +25,7 @@ pub fn send_raw(printer: &str, job: &[u8]) -> Result<()> {
     }
 
     let mut child = Command::new("lp")
-        .args(["-d", printer, "-o", "raw", "-t", "thermal-rs"])
+        .args(["-d", printer, "-o", "raw", "-t", "Label Printer"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

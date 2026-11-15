@@ -1,0 +1,12 @@
+#!/bin/sh
+# Drop the USB permission rule's effect once the package is removed.
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules || true
+        udevadm trigger --subsystem-match=usbmisc --action=change || true
+    fi
+fi
+
+#DEBHELPER#

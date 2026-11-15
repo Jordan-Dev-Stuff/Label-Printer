@@ -1,7 +1,7 @@
 # Command line
 
 `tspl-rs` is the test harness and the fallback when the app is unavailable. It
-uses the same engine as the app. It is installed next to `thermal-ui.exe`.
+uses the same engine as the app. It is installed next to `label-printer.exe`.
 
 ## Commands
 
