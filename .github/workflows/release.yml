@@ -190,7 +190,7 @@ jobs:
           v="${{ needs.version.outputs.version }}"
           # RPM versions may not contain "-" (e.g. 0.3.1-test).
           rpm_version="${v//-/_}"
-          cargo generate-rpm -p label-printer \
+          cargo generate-rpm -p crates/label-printer \
             --set-metadata "version = \"$rpm_version\"" \
             -o "dist/Label-Printer-$v-linux-x86_64.rpm"
           sudo apt-get install -y rpm

@@ -90,7 +90,7 @@ assets = [
     ["../../vendor/pdfium/linux-x86_64/LICENSE", "usr/share/doc/label-printer/LICENSE-pdfium", "644"],
 ]
 
-# `cargo generate-rpm -p label-printer` after `cargo build --release`
+# `cargo generate-rpm -p crates/label-printer` after `cargo build --release`
 # (the release workflow does this) for Fedora, openSUSE and other RPM
 # distributions. Same contents as the .deb. Sources are relative to the
 # repository root.
