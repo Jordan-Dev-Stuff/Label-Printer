@@ -20,6 +20,8 @@ TARGETS:
   raw:PRINTER     submit a RAW job to a spooler queue
   usb:PATH        write bytes straight to a USB printer (no queue)
   serial:PORT     write bytes to a serial port or device node
+  rfcomm:ADDR     Bluetooth Classic serial link, e.g. rfcomm:DC:1D:30:87:F2:CE
+                  (Linux; optional ,CHANNEL suffix, default 1; no pairing)
   file:PATH       write the job to a file (no printer needed)
 
 OPTIONS (print):
@@ -193,8 +195,9 @@ fn cmd_send(args: &[String]) -> Result<(), String> {
 
 /// Parses `--key value` pairs; unknown flags are rejected.
 fn parse_flags(args: &[String]) -> Result<Vec<(String, String)>, String> {
-    const KNOWN: [&str; 10] = [
-        "target", "pattern", "pgm", "width", "height", "dpi", "density", "speed", "gap", "copies",
+    const KNOWN: [&str; 11] = [
+        "target", "job", "pattern", "pgm", "width", "height", "dpi", "density", "speed", "gap",
+        "copies",
     ];
 
     let mut parsed = Vec::new();

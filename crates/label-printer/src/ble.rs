@@ -4,6 +4,11 @@
 //! needs no pairing and therefore no PIN. (Windows' "Add device" pairs the
 //! printer over Bluetooth *Classic*, which is what asks for a PIN.)
 //!
+//! On Linux, a dual-mode printer is printed to over its Bluetooth Classic
+//! serial channel (RFCOMM) instead, when it answers there: bluetoothd 5.88
+//! leaves such printers with an empty GATT table, and RFCOMM needs neither
+//! GATT nor pairing. The LE side is only a fallback there.
+//!
 //! The UI thread never blocks: it sends [`BleCommand`]s and polls
 //! [`BleEvent`]s. The worker owns a single-threaded Tokio runtime, the
 //! adapter, and the connected peripheral.
@@ -36,6 +41,10 @@ const DISCOVERY_RETRY_DELAY: Duration = Duration::from_secs(2);
 const CONNECT_ATTEMPTS: u32 = 3;
 /// Wait between connection attempts.
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(1500);
+/// Bytes per RFCOMM write, so progress and cancel stay responsive.
+const SERIAL_CHUNK: usize = 4096;
+/// Prefix of a remembered id that names a Bluetooth Classic address.
+const SERIAL_ID_PREFIX: &str = "rfcomm:";
 /// Longest scan when looking for a remembered printer; it stops as soon as
 /// the printer is seen. The first scan after start-up can be slow on Windows.
 const RECONNECT_SCAN_TIME: Duration = Duration::from_secs(15);
@@ -178,9 +187,20 @@ pub fn spawn(wake: impl Fn() + Send + 'static) -> Ble {
 
 /// A connected device and its print channel.
 struct Session {
-    peripheral: Peripheral,
-    characteristic: Characteristic,
+    link: Link,
     name: String,
+}
+
+/// How print data reaches the printer.
+enum Link {
+    /// A GATT characteristic on the LE connection.
+    Gatt {
+        peripheral: Peripheral,
+        characteristic: Characteristic,
+    },
+    /// The Bluetooth Classic serial channel, opened per job. Holds the
+    /// printer's Classic address.
+    Serial(String),
 }
 
 fn worker(commands: &Receiver<BleCommand>, send: &dyn Fn(BleEvent), cancel: &AtomicBool) {
@@ -222,7 +242,7 @@ fn worker(commands: &Receiver<BleCommand>, send: &dyn Fn(BleEvent), cancel: &Ato
             }
             BleCommand::Connect(id) => {
                 if let Some(old) = session.take() {
-                    let _ = runtime.block_on(old.peripheral.disconnect());
+                    runtime.block_on(old.disconnect());
                 }
                 match runtime.block_on(connect(adapter, &id)) {
                     Ok(new) => {
@@ -234,6 +254,20 @@ fn worker(commands: &Receiver<BleCommand>, send: &dyn Fn(BleEvent), cancel: &Ato
             }
             BleCommand::Reconnect { id, name } => {
                 if session.is_some() {
+                    continue;
+                }
+                // A Classic printer is reached by address; no scan needed.
+                if let Some(address) = id.strip_prefix(SERIAL_ID_PREFIX) {
+                    match open_serial(&name, address) {
+                        Ok(new) => {
+                            send(connected_event(&new));
+                            session = Some(new);
+                        }
+                        Err(error) => send(BleEvent::NotFound {
+                            name,
+                            detail: error,
+                        }),
+                    }
                     continue;
                 }
                 let devices = match runtime.block_on(scan(
@@ -279,11 +313,30 @@ fn worker(commands: &Receiver<BleCommand>, send: &dyn Fn(BleEvent), cancel: &Ato
                     ));
                     continue;
                 };
-                // A printer that went to sleep drops the link; reconnect once.
-                let alive = runtime
-                    .block_on(current.peripheral.is_connected())
-                    .unwrap_or(false);
-                if !alive && runtime.block_on(current.peripheral.connect()).is_err() {
+                // `None`: the link is gone and could not be reopened.
+                let result = match &current.link {
+                    Link::Serial(address) => Some(write_serial(address, &job, cancel, send)),
+                    Link::Gatt {
+                        peripheral,
+                        characteristic,
+                    } => {
+                        // A printer that went to sleep drops the link; reconnect once.
+                        let alive = runtime.block_on(peripheral.is_connected()).unwrap_or(false);
+                        if !alive && runtime.block_on(peripheral.connect()).is_err() {
+                            None
+                        } else {
+                            Some(runtime.block_on(write_job(
+                                peripheral,
+                                characteristic,
+                                &job,
+                                fast,
+                                cancel,
+                                send,
+                            )))
+                        }
+                    }
+                };
+                let Some(result) = result else {
                     send(BleEvent::Error(format!(
                         "lost the connection to {}; switch it on and connect again",
                         current.name
@@ -291,8 +344,8 @@ fn worker(commands: &Receiver<BleCommand>, send: &dyn Fn(BleEvent), cancel: &Ato
                     session = None;
                     send(BleEvent::Disconnected);
                     continue;
-                }
-                match runtime.block_on(write_job(current, &job, fast, cancel, send)) {
+                };
+                match result {
                     Ok(true) => send(BleEvent::Printed(job.len())),
                     Ok(false) => send(BleEvent::Cancelled),
                     Err(error) => send(BleEvent::Error(error)),
@@ -300,7 +353,7 @@ fn worker(commands: &Receiver<BleCommand>, send: &dyn Fn(BleEvent), cancel: &Ato
             }
             BleCommand::Disconnect => {
                 if let Some(old) = session.take() {
-                    let _ = runtime.block_on(old.peripheral.disconnect());
+                    runtime.block_on(old.disconnect());
                 }
                 send(BleEvent::Disconnected);
             }
@@ -308,12 +361,73 @@ fn worker(commands: &Receiver<BleCommand>, send: &dyn Fn(BleEvent), cancel: &Ato
     }
 }
 
-fn connected_event(session: &Session) -> BleEvent {
-    BleEvent::Connected {
-        id: format!("{:?}", session.peripheral.id()),
-        name: session.name.clone(),
-        channel: session.characteristic.uuid.to_string(),
+impl Session {
+    async fn disconnect(self) {
+        if let Link::Gatt { peripheral, .. } = self.link {
+            let _ = peripheral.disconnect().await;
+        }
     }
+}
+
+fn connected_event(session: &Session) -> BleEvent {
+    let (id, channel) = match &session.link {
+        Link::Gatt {
+            peripheral,
+            characteristic,
+        } => (
+            format!("{:?}", peripheral.id()),
+            characteristic.uuid.to_string(),
+        ),
+        Link::Serial(address) => (
+            format!("{SERIAL_ID_PREFIX}{address}"),
+            format!("Bluetooth Classic serial (RFCOMM) at {address}"),
+        ),
+    };
+    BleEvent::Connected {
+        id,
+        name: session.name.clone(),
+        channel,
+    }
+}
+
+/// Checks that the printer answers on its Classic serial channel. The link
+/// is closed again; each job opens its own.
+fn open_serial(name: &str, address: &str) -> Result<Session, String> {
+    tspl_core::rfcomm::connect(address)
+        .map_err(|error| format!("{name} did not answer over Bluetooth Classic: {error}"))?;
+    Ok(Session {
+        link: Link::Serial(address.to_string()),
+        name: name.to_string(),
+    })
+}
+
+/// The Bluetooth Classic address to print to instead of LE: the device's own
+/// when it is a Classic device, else that of its Classic twin (`NAME` for
+/// `NAME-LE`) when the scan saw one.
+#[cfg(target_os = "linux")]
+async fn classic_address(
+    adapter: &Adapter,
+    properties: Option<&btleplug::api::PeripheralProperties>,
+) -> Option<String> {
+    let properties = properties?;
+    if properties.class.is_some() {
+        return Some(properties.address.to_string());
+    }
+    let name = properties.local_name.as_deref()?.to_ascii_lowercase();
+    let twin = name.strip_suffix("-le")?;
+    for candidate in adapter.peripherals().await.ok()? {
+        let Some(other) = candidate.properties().await.ok().flatten() else {
+            continue;
+        };
+        let same_name = other
+            .local_name
+            .as_deref()
+            .is_some_and(|n| n.eq_ignore_ascii_case(twin));
+        if same_name && other.address != properties.address {
+            return Some(other.address.to_string());
+        }
+    }
+    None
 }
 
 async fn first_adapter() -> Result<Adapter, String> {
@@ -407,8 +521,22 @@ async fn connect(adapter: &Adapter, id: &str) -> Result<Session, String> {
         .map(|p| p.address.to_string())
         .unwrap_or_default();
     let name = properties
-        .and_then(|p| p.local_name)
+        .as_ref()
+        .and_then(|p| p.local_name.clone())
         .unwrap_or_else(|| "Bluetooth printer".to_string());
+
+    // Prefer the Classic serial channel on Linux (see the module docs). A
+    // Classic device has no LE side to fall back to, so its error stands.
+    #[cfg(target_os = "linux")]
+    if let Some(classic) = classic_address(adapter, properties.as_ref()).await {
+        match open_serial(&name, &classic) {
+            Ok(session) => return Ok(session),
+            Err(error) if properties.as_ref().is_some_and(|p| p.class.is_some()) => {
+                return Err(error);
+            }
+            Err(_) => {}
+        }
+    }
 
     // On Linux `Device1.Connected` is true for any bearer and for a link this
     // app did not open: a desktop Bluetooth panel, BlueZ auto-connect, or a
@@ -471,8 +599,10 @@ async fn connect(adapter: &Adapter, id: &str) -> Result<Session, String> {
     };
 
     Ok(Session {
-        characteristic: characteristics[index].clone(),
-        peripheral,
+        link: Link::Gatt {
+            characteristic: characteristics[index].clone(),
+            peripheral,
+        },
         name,
     })
 }
@@ -539,8 +669,8 @@ pub fn channel_error(name: &str, channels: &[ChannelInfo]) -> String {
             "{name} is connected, but the Bluetooth stack published no GATT services for it, \
              so nothing can be written. This is usually the operating system, not the printer: \
              on Linux, bluetoothd can leave a dual-mode printer connected with an empty GATT \
-             table. Disconnect and reconnect in your Bluetooth settings, or print over \
-             Bluetooth Classic with a serial target (see docs/transports.md)"
+             table, and the printer did not answer over Bluetooth Classic either. Switch the \
+             printer off and on, then connect again"
         );
     }
     format!(
@@ -691,15 +821,47 @@ pub fn write_mode(acknowledged: bool, unacknowledged: bool, fast: bool) -> Write
     }
 }
 
+/// Writes `job` over a fresh RFCOMM link. Returns `Ok(false)` when cancelled.
+/// The socket's own flow control paces the writes.
+fn write_serial(
+    address: &str,
+    job: &[u8],
+    cancel: &AtomicBool,
+    send: &dyn Fn(BleEvent),
+) -> Result<bool, String> {
+    use std::io::Write as _;
+
+    let mut link = tspl_core::rfcomm::connect(address).map_err(|error| error.to_string())?;
+    let mut sent = 0;
+    send(BleEvent::Progress {
+        sent,
+        total: job.len(),
+    });
+    for chunk in job.chunks(SERIAL_CHUNK) {
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+        link.write_all(chunk)
+            .map_err(|error| format!("Bluetooth write failed after {sent} bytes: {error}"))?;
+        sent += chunk.len();
+        send(BleEvent::Progress {
+            sent,
+            total: job.len(),
+        });
+    }
+    Ok(true)
+}
+
 /// Writes `job` in chunks. Returns `Ok(false)` when cancelled.
 async fn write_job(
-    session: &Session,
+    peripheral: &Peripheral,
+    characteristic: &Characteristic,
     job: &[u8],
     fast: bool,
     cancel: &AtomicBool,
     send: &dyn Fn(BleEvent),
 ) -> Result<bool, String> {
-    let properties = session.characteristic.properties;
+    let properties = characteristic.properties;
     let mode = write_mode(
         properties.contains(CharPropFlags::WRITE),
         properties.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE),
@@ -726,9 +888,8 @@ async fn write_job(
                 }
             }
         };
-        session
-            .peripheral
-            .write(&session.characteristic, chunk, write_type)
+        peripheral
+            .write(characteristic, chunk, write_type)
             .await
             .map_err(|error| format!("Bluetooth write failed after {sent} bytes: {error}"))?;
         sent += chunk.len();
@@ -976,7 +1137,7 @@ mod tests {
         // Connected, but the stack published nothing: blame the stack, not the printer.
         let message = channel_error("BY-482BT_F2CE-LE", &[]);
         assert!(message.contains("published no GATT services"), "{message}");
-        assert!(message.contains("transports.md"), "{message}");
+        assert!(message.contains("Bluetooth Classic"), "{message}");
         assert!(!message.contains("may not be a label printer"), "{message}");
 
         // A real table with only standard services: the device answered, but has

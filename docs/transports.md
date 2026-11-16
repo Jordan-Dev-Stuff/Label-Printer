@@ -6,7 +6,8 @@ driver is involved. The app's preference order, and why:
 | Route | Target | Driver involved | Setup |
 | --- | --- | --- | --- |
 | Direct USB | `usb:\\?\usb#vid_09c6&pid_0426#…` | None: inbox `usbprint.sys` only | None |
-| Bluetooth LE | the app's BLE session | None | None (no pairing, no PIN); on Linux needs bluetoothd to export the GATT table |
+| Bluetooth LE | the app's BLE session | None | None (no pairing, no PIN) |
+| Bluetooth Classic, Linux | `rfcomm:DC:1D:30:87:F2:CE`, or the app's BLE session | None | None (no pairing, no root) |
 | Print queue | `raw:BY-482BT-RAW` | A queue driver, e.g. *Generic / Text Only* | Admin, once |
 | Bluetooth Classic | `serial:COM8` | Inbox SPP serial driver | Windows pairing, with PIN |
 | File | `file:out\job.tspl` | n/a | None |
@@ -74,36 +75,38 @@ Implementation: [`crates/label-printer/src/ble.rs`](../crates/label-printer/src/
 
 ### LE on Linux, and the Classic fallback
 
-On Windows and iOS the LE path is all there is to it. On Linux it currently
-depends on bluetoothd finishing GATT discovery, and with BlueZ 5.88 (Fedora 45)
-it does not: the LE link comes up, the printer answers service discovery, and
-bluetoothd still exports no services, so every central sees zero
-characteristics. The full evidence, addresses and GATT handles are in
-[protocol.md §4](protocol.md#on-linux-bluez-hw).
+On Windows and iOS the LE path is all there is to it. On Linux, bluetoothd
+5.88 (Fedora 45) breaks it for this printer: the LE link comes up, the printer
+answers service discovery, and bluetoothd still exports no services, so every
+central sees zero characteristics. The full evidence, addresses and GATT
+handles are in [protocol.md §4](protocol.md#on-linux-bluez-hw).
 
-The app now names that case instead of blaming the printer ("published no GATT
-services"), and on Linux it no longer skips `connect()` when BlueZ reports the
-device as already connected — that shortcut could return an empty GATT table
-without ever waiting for service discovery.
+So on Linux the app prints over the printer's Bluetooth Classic serial
+channel instead. The printer is dual-mode and shows up twice in a scan,
+`BY-482BT_F2CE-LE` and its Classic twin `BY-482BT_F2CE` at a separate public
+address. Connecting to the LE entry looks up the twin and opens an RFCOMM
+socket to it on SPP channel 1. Nothing needs setting up first:
 
-If LE stays empty, use the printer's Classic radio. It is a separate address
-(the public one):
+* no pairing and no PIN — the printer accepts the connection unpaired;
+* no `rfcomm bind`, no `/dev/rfcomm*` node and no root — the app opens the
+  socket itself;
+* the remembered printer is stored by its Classic address, so reconnecting
+  after a restart needs no scan.
+
+If the Classic side does not answer, the app falls back to LE. The activity
+log shows which one it used ("print channel Bluetooth Classic serial
+(RFCOMM) at …" versus a GATT UUID).
+
+The CLI takes the same route:
 
 ```bash
-bluetoothctl pair DC:1D:30:87:F2:CE      # legacy PIN: 0000, else 1234
-bluetoothctl trust DC:1D:30:87:F2:CE
-sudo rfcomm bind 0 DC:1D:30:87:F2:CE 1   # SPP channel 1
-tspl-rs print --target serial:/dev/rfcomm0 --pattern testcard
+tspl-rs print --target rfcomm:DC:1D:30:87:F2:CE --pattern testcard
+tspl-rs print --target rfcomm:DC:1D:30:87:F2:CE,2   # another channel
 ```
 
-`rfcomm bind` allocates `/dev/rfcomm0`; write TSPL bytes to it as to a serial
-port. The app already accepts `serial:/dev/rfcomm0`, and its discovery lists
-the bound node (Linux gives it no device name, so it appears as
-*Bluetooth serial*). Re-run `rfcomm bind` after a reboot, or let the app's
-serial target use the node while it exists (`rfcomm release 0` removes it).
+`serial:/dev/rfcomm0` still works for anyone who binds a node by hand.
 
-This path needs pairing once. That is the Windows `Add device` PIN again, and
-it is the only option until Linux's LE stack exports the printer's services.
+Implementation: [`crates/tspl-core/src/rfcomm.rs`](../crates/tspl-core/src/rfcomm.rs).
 
 ## Print queues (optional)
 

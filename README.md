@@ -10,9 +10,10 @@
 > your own risk.
 
 > [!NOTE]
-> **Windows is the only tested platform.** Linux and macOS builds are
-> published with every release and pass the automated tests, but they have
-> never been tried with a real printer. Reports are welcome.
+> **Windows is the main tested platform.** Linux has been tried with a real
+> printer over Bluetooth only (Fedora 45). macOS builds are published with
+> every release and pass the automated tests, but have never been tried with a
+> real printer. Reports are welcome.
 
 Print shipping labels and other PDFs or images on TSPL thermal label printers
 (PEDOOLO / BEEPRT BY-482BT and similar) **with no printer driver at all**:
@@ -112,7 +113,10 @@ connect over Bluetooth LE (or a CUPS raw queue).
   *not* pair the printer in your system's Bluetooth settings: that uses
   Bluetooth Classic and asks for a PIN (usually `0000` or `1234`). The app uses
   Bluetooth LE, like the phone app, which needs no PIN. The printer is
-  remembered and reconnected automatically next time.
+  remembered and reconnected automatically next time. On Linux the app
+  prints over the printer's Bluetooth Classic serial channel instead, still
+  with no pairing, PIN or root, because BlueZ 5.88 does not expose the
+  printer's LE services (see [docs/transports.md](docs/transports.md)).
 
 ## Command line
 
@@ -180,11 +184,12 @@ vendor/pdfium/     fetched PDF renderer, embedded at build time (not committed)
 
 | Capability | Windows | Linux | macOS |
 | --- | --- | --- | --- |
-| **Tested with a printer** | **yes** | no | no |
+| **Tested with a printer** | **yes** | Bluetooth only | no |
 | Built and unit-tested in CI | yes | yes | yes |
 | Direct USB, no driver | `usbprint.sys` | `/dev/usb/lp*` | — |
 | Bluetooth LE | yes | yes | yes |
 | Paired Bluetooth serial | `COMx` | `/dev/rfcomm*` | `/dev/cu.*` |
+| Bluetooth Classic, no pairing | — | `rfcomm:ADDRESS` (automatic in the app) | — |
 | RAW print queue (optional) | `winspool.drv` | `lp -o raw` | `lp -o raw` |
 
 ## License

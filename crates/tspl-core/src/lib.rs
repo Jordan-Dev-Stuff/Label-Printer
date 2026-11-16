@@ -2,7 +2,8 @@
 //!
 //! This crate is the engine behind Label Printer. It takes an 8-bit grayscale
 //! [`Frame`], halftones it, encodes a TSPL/TSPL2 job and delivers it to a file,
-//! a serial port or a spooler queue — no vendor driver in the path.
+//! a serial port, a Bluetooth RFCOMM link or a spooler queue — no vendor
+//! driver in the path.
 //!
 //! ```no_run
 //! use tspl_core::{encode, parse_target, Config, Frame};
@@ -30,6 +31,7 @@ mod spooler;
 pub mod discover;
 pub mod encode;
 pub mod frame;
+pub mod rfcomm;
 pub mod target;
 
 pub use encode::{

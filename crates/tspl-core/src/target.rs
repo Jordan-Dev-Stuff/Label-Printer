@@ -1,4 +1,5 @@
-//! Where a job goes: a file, a serial port, a USB printer or a spooler queue.
+//! Where a job goes: a file, a serial port, a USB printer, a Bluetooth
+//! Classic (RFCOMM) link or a spooler queue.
 
 use std::fs;
 use std::io::Write;
@@ -18,6 +19,9 @@ pub enum Target {
     Usb(String),
     /// Submit the job to a spooler queue as a RAW job.
     Raw(String),
+    /// Connect to a Bluetooth Classic printer's serial channel (Linux):
+    /// `DC:1D:30:87:F2:CE`, optionally followed by `,CHANNEL`.
+    Rfcomm(String),
 }
 
 impl Target {
@@ -29,6 +33,7 @@ impl Target {
             Self::Serial(_) => "serial",
             Self::Usb(_) => "usb",
             Self::Raw(_) => "raw",
+            Self::Rfcomm(_) => "rfcomm",
         }
     }
 
@@ -37,7 +42,9 @@ impl Target {
     pub fn value(&self) -> String {
         match self {
             Self::File(path) => path.display().to_string(),
-            Self::Serial(port) | Self::Usb(port) | Self::Raw(port) => port.clone(),
+            Self::Serial(port) | Self::Usb(port) | Self::Raw(port) | Self::Rfcomm(port) => {
+                port.clone()
+            }
         }
     }
 
@@ -63,11 +70,13 @@ impl Target {
             Self::Serial(port) => send_serial(port, job),
             Self::Usb(path) => send_usb(path, job),
             Self::Raw(printer) => crate::spooler::send_raw(printer, job),
+            Self::Rfcomm(spec) => send_rfcomm(spec, job),
         }
     }
 }
 
-/// Parses `raw:PRINTER`, `usb:PATH`, `file:PATH` or `serial:PORT`.
+/// Parses `raw:PRINTER`, `usb:PATH`, `file:PATH`, `serial:PORT` or
+/// `rfcomm:ADDRESS[,CHANNEL]`.
 ///
 /// The value is everything after the first colon, so Windows paths such as
 /// `file:C:\temp\job.tspl` survive intact.
@@ -84,7 +93,8 @@ pub fn parse_target(spec: &str) -> Result<Target> {
 
     let Some((kind, value)) = spec.split_once(':') else {
         return Err(Error::InvalidTarget(format!(
-            "{spec:?} must look like raw:PRINTER, usb:PATH, file:PATH or serial:PORT"
+            "{spec:?} must look like raw:PRINTER, usb:PATH, file:PATH, serial:PORT \
+             or rfcomm:ADDRESS"
         )));
     };
 
@@ -99,8 +109,12 @@ pub fn parse_target(spec: &str) -> Result<Target> {
         "file" => Ok(Target::File(PathBuf::from(value))),
         "serial" => Ok(Target::Serial(value.to_string())),
         "usb" => Ok(Target::Usb(value.to_string())),
+        "rfcomm" => {
+            crate::rfcomm::parse_spec(value)?;
+            Ok(Target::Rfcomm(value.to_string()))
+        }
         other => Err(Error::InvalidTarget(format!(
-            "unknown kind {other:?}, want raw, usb, file or serial"
+            "unknown kind {other:?}, want raw, usb, file, serial or rfcomm"
         ))),
     }
 }
@@ -123,6 +137,13 @@ fn send_serial(port: &str, job: &[u8]) -> Result<()> {
         return Err(Error::InvalidTarget("empty serial port".to_string()));
     }
     write_node(&name, job)
+}
+
+/// Writes the job over a Bluetooth Classic RFCOMM link.
+fn send_rfcomm(spec: &str, job: &[u8]) -> Result<()> {
+    let mut link = crate::rfcomm::connect(spec)?;
+    link.write_all(job)
+        .map_err(|error| Error::io(format!("write to {spec} over Bluetooth"), error))
 }
 
 /// Writes the job to a USB printer interface.

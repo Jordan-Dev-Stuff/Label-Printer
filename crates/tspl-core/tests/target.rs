@@ -137,3 +137,12 @@ fn windows_com_ports_are_namespaced() {
     #[cfg(windows)]
     assert_eq!(normalize_port(r"\\.\COM12"), r"\\.\COM12");
 }
+
+#[test]
+fn rfcomm_targets_keep_the_whole_address() {
+    let target = parse_target("rfcomm:DC:1D:30:87:F2:CE").expect("parse");
+    assert_eq!(target, Target::Rfcomm("DC:1D:30:87:F2:CE".to_string()));
+    assert_eq!(target.describe(), "rfcomm:DC:1D:30:87:F2:CE");
+    assert!(parse_target("rfcomm:DC:1D:30:87:F2:CE,2").is_ok());
+    assert!(parse_target("rfcomm:/dev/rfcomm0").is_err());
+}
