@@ -273,6 +273,74 @@ Picking "the first writable characteristic" is a trap: Generic Access
 rename the printer and never print. The Activity log records which
 channel was chosen for a given printer.
 
+### On Linux (BlueZ) [hw]
+
+Observed on Fedora 45 with `bluez-5.88-1.fc45`, kernel 7.3.3, against this
+printer. The two radios are **two device objects at two addresses**, not one
+dual-mode entry:
+
+| | Classic side | LE side |
+| --- | --- | --- |
+| Name | `BY-482BT_F2CE` | `BY-482BT_F2CE-LE` |
+| Address | `DC:1D:30:87:F2:CE` (public) | `DC:0D:30:87:F2:CE` (random static) |
+| Advertising | BR/EDR, SDP UUIDs incl. Serial Port `0x1101` | flags `0x0a`, company `0x0000` = its own address, UUID `0xfee7`; **no local name** |
+| Bonding | pairs, with a PIN | none |
+
+So `bluetoothctl devices` lists both, and the app's `-LE` twin filter hides the
+Classic one. Never connect the Classic entry: BlueZ answers
+`org.bluez.Error.BREDR.ProfileUnavailable: No more profiles to connect to` and
+*still* leaves the device `Connected: yes` over BR/EDR — a state that makes an
+already-connected shortcut look valid with no GATT behind it.
+
+The LE GATT table, read from `btmon`:
+
+| Handles | Service |
+| --- | --- |
+| `0x0001`-`0x0005` | Generic Access (`0x1800`) |
+| `0x0006`-`0x0008` | Generic Attribute (`0x1801`) |
+| `0x0009`-`0x0019` | Device Information (`0x180A`) |
+| `0x001a`-`0x0024` | ISSC/Microchip transparent UART (`49535343-fe7d-4ae5-8fa9-9fafd205e455`) |
+| `0x0025`-`0x002a` | `0xfff0` |
+| `0x002b`-`0x0032` | Tencent (`0xfee7`) |
+
+The print channel is the ISSC service's writable characteristic
+`49535343-8841-43f4-a8d4-ecbe34729bb3`, which is why that UUID is in
+[`KNOWN_WRITE_UUIDS`](../crates/label-printer/src/ble.rs).
+
+**BlueZ 5.88 does not export this table.** The LE link comes up correctly
+(`Role: peripheral`, MTU exchange 517→185), the printer answers
+`Read By Group Type` with all six services, and then bluetoothd stops: it never
+sends characteristic discovery (`Read By Type`, attribute type `0x2803`), sets
+`ServicesResolved: true`, and exports no `GattService1` objects at all.
+
+```console
+$ bluetoothctl connect DC:0D:30:87:F2:CE
+Connection successful
+$ busctl introspect org.bluez /org/bluez/hci0/dev_DC_0D_30_87_F2_CE org.bluez.Device1
+.ServicesResolved  property b  true
+.Connected         property b  true
+.UUIDs             property as 1 "0000fee7-0000-1000-8000-00805f9b34fb"
+$ busctl call org.bluez / org.freedesktop.DBus.ObjectManager GetManagedObjects | grep -c service
+0
+```
+
+Anything that reads GATT through BlueZ — this app, btleplug, `bleak`, the
+`bluetoothctl gatt` menu — therefore sees zero characteristics, and the app's
+message says so. `bluetoothctl pair` never completes and `Paired` stays `no`,
+so bonding is not the missing piece. The printer is not at fault: the same unit
+serves this table to Windows and iOS.
+
+Before blaming the printer, check the stack:
+
+```bash
+sudo btmon                                     # terminal A
+bluetoothctl --timeout 20 connect DC:0D:30:87:F2:CE   # terminal B
+```
+
+If services are discovered but no `0x2803` reads follow, it is bluetoothd.
+Until that is fixed, print over Bluetooth Classic on Linux (see
+[transports.md](transports.md)).
+
 ### Pacing [hw]
 
 | Mode | Writes | Notes |

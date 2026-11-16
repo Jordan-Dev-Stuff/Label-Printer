@@ -410,6 +410,19 @@ async fn connect(adapter: &Adapter, id: &str) -> Result<Session, String> {
         .and_then(|p| p.local_name)
         .unwrap_or_else(|| "Bluetooth printer".to_string());
 
+    // On Linux `Device1.Connected` is true for any bearer and for a link this
+    // app did not open: a desktop Bluetooth panel, BlueZ auto-connect, or a
+    // failed Classic attempt that left the device connected. Nothing has waited
+    // for `ServicesResolved` in that state, and `discover_services` only
+    // introspects D-Bus, so the device looks connected with an empty GATT table.
+    // Drop the link first so `connect` runs a full LE connect and waits for
+    // service discovery. Windows never needed this and is unchanged.
+    #[cfg(target_os = "linux")]
+    if peripheral.is_connected().await.unwrap_or(false) {
+        let _ = peripheral.disconnect().await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
     // BlueZ on Linux sometimes abandons an LE connection while setting it up
     // ("le-connection-abort-by-local"); a second attempt usually succeeds.
     let mut attempt = 0;
@@ -454,11 +467,7 @@ async fn connect(adapter: &Adapter, id: &str) -> Result<Session, String> {
 
     let Some(index) = chosen else {
         let _ = peripheral.disconnect().await;
-        return Err(format!(
-            "{name} has no printer data channel ({}). It may not be a printer, or it may \
-             only support Bluetooth Classic",
-            describe_gatt(&infos)
-        ));
+        return Err(channel_error(&name, &infos));
     };
 
     Ok(Session {
@@ -512,6 +521,32 @@ pub fn describe_gatt(channels: &[ChannelInfo]) -> String {
         } else {
             writable.join(", ")
         }
+    )
+}
+
+/// Explains a device that connected but left no usable print channel.
+///
+/// The two cases are genuinely different and used to share one message that
+/// blamed Bluetooth Classic. An empty table means the stack never published
+/// the printer's services at all (seen with BlueZ 5.88 on Fedora, where the
+/// link comes up and the ATT service discovery is answered but no
+/// characteristics are ever exported). A table with only standard services
+/// means the device answered but has nothing that looks like a print channel.
+#[must_use]
+pub fn channel_error(name: &str, channels: &[ChannelInfo]) -> String {
+    if channels.is_empty() {
+        return format!(
+            "{name} is connected, but the Bluetooth stack published no GATT services for it, \
+             so nothing can be written. This is usually the operating system, not the printer: \
+             on Linux, bluetoothd can leave a dual-mode printer connected with an empty GATT \
+             table. Disconnect and reconnect in your Bluetooth settings, or print over \
+             Bluetooth Classic with a serial target (see docs/transports.md)"
+        );
+    }
+    format!(
+        "{name} has no printer data channel ({}). Its writable characteristics are all part of \
+         standard GATT services, so it may not be a label printer",
+        describe_gatt(channels)
     )
 }
 
@@ -934,6 +969,26 @@ mod tests {
         ] {
             assert!(!is_transient_connect_error(give_up), "{give_up}");
         }
+    }
+
+    #[test]
+    fn empty_and_standard_only_tables_get_different_advice() {
+        // Connected, but the stack published nothing: blame the stack, not the printer.
+        let message = channel_error("BY-482BT_F2CE-LE", &[]);
+        assert!(message.contains("published no GATT services"), "{message}");
+        assert!(message.contains("transports.md"), "{message}");
+        assert!(!message.contains("may not be a label printer"), "{message}");
+
+        // A real table with only standard services: the device answered, but has
+        // nothing writable that could carry TSPL.
+        let channels = [channel(DEVICE_NAME, GAP, true, false)];
+        let message = channel_error("Speaker", &channels);
+        assert!(message.contains("no printer data channel"), "{message}");
+        assert!(
+            message.contains("writable: 2a00"),
+            "short UUID in {message}"
+        );
+        assert!(!message.contains("published no GATT services"), "{message}");
     }
 
     #[test]

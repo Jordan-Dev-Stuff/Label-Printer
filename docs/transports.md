@@ -6,7 +6,7 @@ driver is involved. The app's preference order, and why:
 | Route | Target | Driver involved | Setup |
 | --- | --- | --- | --- |
 | Direct USB | `usb:\\?\usb#vid_09c6&pid_0426#…` | None: inbox `usbprint.sys` only | None |
-| Bluetooth LE | the app's BLE session | None | None (no pairing, no PIN) |
+| Bluetooth LE | the app's BLE session | None | None (no pairing, no PIN); on Linux needs bluetoothd to export the GATT table |
 | Print queue | `raw:BY-482BT-RAW` | A queue driver, e.g. *Generic / Text Only* | Admin, once |
 | Bluetooth Classic | `serial:COM8` | Inbox SPP serial driver | Windows pairing, with PIN |
 | File | `file:out\job.tspl` | n/a | None |
@@ -58,6 +58,10 @@ Bluetooth card, with no pairing and no PIN. Do not pair the printer in
 Windows settings for this. If it is already paired and LE fails, remove it from
 Windows Bluetooth settings and scan again.
 
+On Linux, LE also needs bluetoothd to publish the printer's GATT services; see
+[LE on Linux, and the Classic fallback](#le-on-linux-and-the-classic-fallback)
+below.
+
 Implementation: [`crates/label-printer/src/ble.rs`](../crates/label-printer/src/ble.rs).
 
 1. Scan for advertisers; printers sort first.
@@ -67,6 +71,39 @@ Implementation: [`crates/label-printer/src/ble.rs`](../crates/label-printer/src/
    first writable characteristic, often the GAP *Device Name*.
 3. Write 180-byte chunks, with acknowledged writes when supported (flow
    control), otherwise 20 ms apart.
+
+### LE on Linux, and the Classic fallback
+
+On Windows and iOS the LE path is all there is to it. On Linux it currently
+depends on bluetoothd finishing GATT discovery, and with BlueZ 5.88 (Fedora 45)
+it does not: the LE link comes up, the printer answers service discovery, and
+bluetoothd still exports no services, so every central sees zero
+characteristics. The full evidence, addresses and GATT handles are in
+[protocol.md §4](protocol.md#on-linux-bluez-hw).
+
+The app now names that case instead of blaming the printer ("published no GATT
+services"), and on Linux it no longer skips `connect()` when BlueZ reports the
+device as already connected — that shortcut could return an empty GATT table
+without ever waiting for service discovery.
+
+If LE stays empty, use the printer's Classic radio. It is a separate address
+(the public one):
+
+```bash
+bluetoothctl pair DC:1D:30:87:F2:CE      # legacy PIN: 0000, else 1234
+bluetoothctl trust DC:1D:30:87:F2:CE
+sudo rfcomm bind 0 DC:1D:30:87:F2:CE 1   # SPP channel 1
+tspl-rs print --target serial:/dev/rfcomm0 --pattern testcard
+```
+
+`rfcomm bind` allocates `/dev/rfcomm0`; write TSPL bytes to it as to a serial
+port. The app already accepts `serial:/dev/rfcomm0`, and its discovery lists
+the bound node (Linux gives it no device name, so it appears as
+*Bluetooth serial*). Re-run `rfcomm bind` after a reboot, or let the app's
+serial target use the node while it exists (`rfcomm release 0` removes it).
+
+This path needs pairing once. That is the Windows `Add device` PIN again, and
+it is the only option until Linux's LE stack exports the printer's services.
 
 ## Print queues (optional)
 
@@ -118,7 +155,8 @@ chooses what to connect to.
 | `open USB printer …: Access is denied` | Another program holds the device | Close the vendor utility |
 | Queue shows *offline* | No device on its USB port | Plug in and switch on; the USB entry appears |
 | Literal `SIZE 101.60 mm` on paper | Queue driver is not pass-through | Use direct USB, or *Generic / Text Only* |
-| BLE: `no printer data channel` | Classic-only firmware, or not a printer | Pair in Windows (PIN `0000`/`1234`), use the COM port |
+| BLE: `published no GATT services` | bluetoothd did not export the printer's table (BlueZ 5.88 on Linux) | Use the Classic SPP node (`serial:/dev/rfcomm0`); see the LE section above |
+| BLE: `no printer data channel` | Not a printer, or only standard GATT services | Pair in Windows (PIN `0000`/`1234`), use the COM port |
 | BLE connects, prints nothing | Printer asleep, or job cancelled part-way | Press FEED, then print again |
 | Every other label blank | Gap setting | Use **Calibrate** |
 
